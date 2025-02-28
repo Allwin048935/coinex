@@ -41,23 +41,23 @@ def fetch_ohlcv(symbol, timeframe, limit):
         return None
 
 # Function to place a market buy order
-def place_market_buy_order(symbol, quantity):
+def place_market_buy_order(symbol, quantity, order_num):
     try:
         order = exchange.create_market_buy_order(symbol, amount=quantity)
-        print(f"Market Buy Order placed for {symbol}: {order['id']}")
+        print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
         return order['id']
     except Exception as e:
-        print(f"Error placing Market Buy Order for {symbol}: {e}")
+        print(f"Order #{order_num} - Error placing Market Buy Order for {symbol}: {e}")
         return None
 
 # Function to place a market sell order
-def place_market_sell_order(symbol, quantity):
+def place_market_sell_order(symbol, quantity, order_num):
     try:
         order = exchange.create_market_sell_order(symbol, amount=quantity)
-        print(f"Market Sell Order placed for {symbol}: {order['id']}")
+        print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
         return order['id']
     except Exception as e:
-        print(f"Error placing Market Sell Order for {symbol}: {e}")
+        print(f"Order #{order_num} - Error placing Market Sell Order for {symbol}: {e}")
         return None
 
 # Function to cancel an open order
@@ -69,14 +69,14 @@ def cancel_open_order(symbol, order_id):
     except Exception as e:
         print(f"Error cancelling order for {symbol}: {e}")
 
-# Main trading function with individual orders
+# Main trading function with individual orders and debug
 def ema_strategy():
     while True:
         try:
             trades_placed = 0
 
             for i, symbol in enumerate(symbols, 1):
-                print(f"Processing pair #{i}: {symbol}")
+                print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
                 historical_data = fetch_ohlcv(symbol, time_interval, 100)
 
                 if historical_data is None or len(historical_data) < long_ema_period:
@@ -103,29 +103,32 @@ def ema_strategy():
                 if (historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1] and
                     last_order_types[symbol] != 'BUY'):
                     print(f'{symbol} Buy Signal (Crossover)')
-                    order_id = place_market_buy_order(symbol, quantity)
+                    trades_placed += 1
+                    order_id = place_market_buy_order(symbol, quantity, trades_placed)
                     if order_id:
                         open_orders[symbol] = order_id
                         last_order_types[symbol] = 'BUY'
-                        trades_placed += 1
-                        print(f"Trade #{trades_placed} placed for {symbol}")
+                    else:
+                        print(f"Failed to place buy order for {symbol}. Continuing...")
                 
                 elif (historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1] and
                       last_order_types[symbol] != 'SELL'):
                     print(f'{symbol} Sell Signal (Crossunder)')
-                    order_id = place_market_sell_order(symbol, quantity)
+                    trades_placed += 1
+                    order_id = place_market_sell_order(symbol, quantity, trades_placed)
                     if order_id:
                         open_orders[symbol] = order_id
                         last_order_types[symbol] = 'SELL'
-                        trades_placed += 1
-                        print(f"Trade #{trades_placed} placed for {symbol}")
+                    else:
+                        print(f"Failed to place sell order for {symbol}. Continuing...")
 
-            print(f"Cycle completed. Trades placed: {trades_placed}")
-            time.sleep(300)  # Wait 5 minutes
+            print(f"\nCycle completed. Total trades placed: {trades_placed}")
+            print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
+            time.sleep(300)
             
         except Exception as e:
-            print(f'An error occurred: {e}')
-            time.sleep(60)  # Retry after 1 minute if cycle fails
+            print(f'An error occurred in cycle: {e}')
+            time.sleep(60)
 
 # Run the trading strategy
 ema_strategy()
