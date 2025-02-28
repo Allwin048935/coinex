@@ -39,13 +39,15 @@ def fetch_ohlcv(symbol, timeframe, limit):
 # Function to get available margin
 def get_available_margin():
     try:
-        balance = exchange.private_get_assets_futures_balance()
-        available = float(balance['data']['available'])  # Adjust key if needed
+        # Fetch futures balance
+        balance = exchange.fetch_balance({'type': 'futures'})
+        # Extract available USDT balance (adjust based on actual response structure)
+        available = float(balance['USDT']['free'])  # 'free' is available balance in CCXT
         print(f"Available margin: ${available}")
         return available
     except Exception as e:
         print(f"Error fetching margin: {e}")
-        return 0
+        return None  # Return None to skip cycle if margin fetch fails
 
 # Function to place a market buy order
 def place_market_buy_order(symbol, quantity):
@@ -81,7 +83,12 @@ def ema_strategy():
     while True:
         try:
             available_margin = get_available_margin()
-            max_trades = int(available_margin / fixed_quantity_usdt)  # e.g., $1,000 / $100 = 10
+            if available_margin is None:
+                print("Skipping cycle due to margin fetch failure.")
+                time.sleep(60)  # Wait 1 minute before retrying
+                continue
+
+            max_trades = int(available_margin / fixed_quantity_usdt)
             trades_placed = 0
             print(f"Max trades allowed this cycle: {max_trades}")
 
