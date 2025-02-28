@@ -7,6 +7,7 @@ from config import COINEX_API_KEY, COINEX_API_SECRET, symbols, time_interval
 exchange = ccxt.coinex({
     'apiKey': COINEX_API_KEY,
     'secret': COINEX_API_SECRET,
+    'options': {'defaultType': 'swap'}
     'enableRateLimit': True
 })
 
