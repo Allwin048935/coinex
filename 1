@@ -28,26 +28,17 @@ def calculate_ema(df, period, column='close'):
 
 # Function to fetch historical data with EMA calculation
 def fetch_ohlcv(symbol, timeframe, limit):
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['short_ema'] = calculate_ema(df, short_ema_period)
-    df['long_ema'] = calculate_ema(df, long_ema_period)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    return df
-
-# Function to get available margin
-def get_available_margin():
     try:
-        # Fetch futures balance
-        balance = exchange.fetch_balance({'type': 'futures'})
-        # Extract available USDT balance (adjust based on actual response structure)
-        available = float(balance['USDT']['free'])  # 'free' is available balance in CCXT
-        print(f"Available margin: ${available}")
-        return available
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['short_ema'] = calculate_ema(df, short_ema_period)
+        df['long_ema'] = calculate_ema(df, long_ema_period)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
     except Exception as e:
-        print(f"Error fetching margin: {e}")
-        return None  # Return None to skip cycle if margin fetch fails
+        print(f"Error fetching OHLCV for {symbol}: {e}")
+        return None
 
 # Function to place a market buy order
 def place_market_buy_order(symbol, quantity):
@@ -78,29 +69,17 @@ def cancel_open_order(symbol, order_id):
     except Exception as e:
         print(f"Error cancelling order for {symbol}: {e}")
 
-# Main trading function with individual orders and margin check
+# Main trading function with individual orders
 def ema_strategy():
     while True:
         try:
-            available_margin = get_available_margin()
-            if available_margin is None:
-                print("Skipping cycle due to margin fetch failure.")
-                time.sleep(60)  # Wait 1 minute before retrying
-                continue
-
-            max_trades = int(available_margin / fixed_quantity_usdt)
             trades_placed = 0
-            print(f"Max trades allowed this cycle: {max_trades}")
 
             for i, symbol in enumerate(symbols, 1):
-                if trades_placed >= max_trades:
-                    print(f"Margin limit reached ({trades_placed}/{max_trades}) at pair #{i}: {symbol}. Stopping.")
-                    break
-
                 print(f"Processing pair #{i}: {symbol}")
                 historical_data = fetch_ohlcv(symbol, time_interval, 100)
 
-                if len(historical_data) < long_ema_period:
+                if historical_data is None or len(historical_data) < long_ema_period:
                     print(f"Not enough data for {symbol}. Skipping...")
                     continue
 
@@ -141,12 +120,12 @@ def ema_strategy():
                         trades_placed += 1
                         print(f"Trade #{trades_placed} placed for {symbol}")
 
-            print(f"Cycle completed. Trades placed: {trades_placed}/{max_trades}")
-            time.sleep(300)
+            print(f"Cycle completed. Trades placed: {trades_placed}")
+            time.sleep(300)  # Wait 5 minutes
             
         except Exception as e:
             print(f'An error occurred: {e}')
-            time.sleep(60)
+            time.sleep(60)  # Retry after 1 minute if cycle fails
 
 # Run the trading strategy
 ema_strategy()
