@@ -15,7 +15,7 @@ exchange = ccxt.coinex({
     'apiKey': COINEX_API_KEY,
     'secret': COINEX_API_SECRET,
     'options': {
-        'defaultType': 'swap',  # For perpetual futures contracts
+        'defaultType': 'futures',  # For perpetual futures contracts
     },
     'enableRateLimit': True
 })
