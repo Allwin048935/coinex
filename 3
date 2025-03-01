@@ -166,7 +166,7 @@ def ema_strategy():
                     open_orders[symbol] = None
 
                 # Check for buy signal (crossover)
-                if (historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]):
+                if (historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]):
                     if last_signals.get(symbol) != 'long':  # Only if not already long
                         print(f'{symbol} Buy Signal (Crossover)')
                         trades_placed += 1
@@ -179,7 +179,7 @@ def ema_strategy():
                             print(f"Failed to place buy order for {symbol}")
                 
                 # Check for sell signal (crossunder)
-                elif (historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]):
+                elif (historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]):
                     if last_signals.get(symbol) != 'short':  # Only if not already short
                         print(f'{symbol} Sell Signal (Crossunder)')
                         trades_placed += 1
