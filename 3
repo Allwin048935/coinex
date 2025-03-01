@@ -189,7 +189,7 @@ def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
-            time.sleep(300)
+            time.sleep(60)
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
