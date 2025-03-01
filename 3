@@ -161,11 +161,7 @@ def ema_strategy():
                 quantity = calculate_quantity(symbol, latest_close)
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
-                if open_orders.get(symbol):
-                    cancel_open_order(symbol, open_orders[symbol])
-                    open_orders[symbol] = None
-
-                # Check EMA conditions first and update signals
+                # Check EMA conditions first
                 if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
                     current_signal = 'long'
                     print(f'{symbol} Potential Buy Signal (Crossover)')
@@ -177,11 +173,21 @@ def ema_strategy():
                     print(f'{symbol} No clear signal (EMAs equal)')
                     continue
 
-                # Check if signal has changed
+                # Handle existing orders and new signals
                 if current_signal and last_signals.get(symbol) != current_signal:
-                    last_signals[symbol] = current_signal  # Update signal regardless of order success
+                    # Cancel any conflicting open order
+                    if open_orders.get(symbol):
+                        current_order_type = last_order_types.get(symbol)
+                        if (current_signal == 'long' and current_order_type == 'SELL') or \
+                           (current_signal == 'short' and current_order_type == 'BUY'):
+                            cancel_open_order(symbol, open_orders[symbol])
+                            open_orders[symbol] = None
+                            print(f"Cancelled conflicting order for {symbol} to switch position")
+
+                    # Update signal before placing new order
+                    last_signals[symbol] = current_signal
                     
-                    # Process order based on signal
+                    # Place new order based on signal
                     if current_signal == 'long':
                         trades_placed += 1
                         order_id = place_market_buy_order(symbol, quantity, trades_placed)
