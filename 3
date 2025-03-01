@@ -38,8 +38,8 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 3
-long_ema_period = 20
+short_ema_period = 5
+long_ema_period = 10
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -48,7 +48,7 @@ symbols = list(symbols_info.keys())
 # Track last order types, open orders, and last signals
 last_order_types = {symbol: None for symbol in symbols}
 open_orders = {symbol: None for symbol in symbols}
-last_signals = {symbol: None for symbol in symbols}  # New: Track last signal
+last_signals = {symbol: None for symbol in symbols}
 
 # Function to set trading parameters
 def set_trading_parameters(symbol):
@@ -165,31 +165,42 @@ def ema_strategy():
                     cancel_open_order(symbol, open_orders[symbol])
                     open_orders[symbol] = None
 
-                # Check for buy signal (crossover)
-                if (historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]):
-                    if last_signals.get(symbol) != 'long':  # Only if not already long
-                        print(f'{symbol} Buy Signal (Crossover)')
+                # Check EMA conditions first and update signals
+                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
+                    current_signal = 'long'
+                    print(f'{symbol} Potential Buy Signal (Crossover)')
+                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]:
+                    current_signal = 'short'
+                    print(f'{symbol} Potential Sell Signal (Crossunder)')
+                else:
+                    current_signal = None
+                    print(f'{symbol} No clear signal (EMAs equal)')
+                    continue
+
+                # Check if signal has changed
+                if current_signal and last_signals.get(symbol) != current_signal:
+                    last_signals[symbol] = current_signal  # Update signal regardless of order success
+                    
+                    # Process order based on signal
+                    if current_signal == 'long':
                         trades_placed += 1
                         order_id = place_market_buy_order(symbol, quantity, trades_placed)
                         if order_id:
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'BUY'
-                            last_signals[symbol] = 'long'  # Update last signal
                         else:
-                            print(f"Failed to place buy order for {symbol}")
-                
-                # Check for sell signal (crossunder)
-                elif (historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]):
-                    if last_signals.get(symbol) != 'short':  # Only if not already short
-                        print(f'{symbol} Sell Signal (Crossunder)')
+                            print(f"Failed to place buy order for {symbol}, signal updated anyway")
+                    
+                    elif current_signal == 'short':
                         trades_placed += 1
                         order_id = place_market_sell_order(symbol, quantity, trades_placed)
                         if order_id:
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'SELL'
-                            last_signals[symbol] = 'short'  # Update last signal
                         else:
-                            print(f"Failed to place sell order for {symbol}")
+                            print(f"Failed to place sell order for {symbol}, signal updated anyway")
+                else:
+                    print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
