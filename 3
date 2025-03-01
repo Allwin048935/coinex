@@ -1,0 +1,202 @@
+import ccxt
+import pandas as pd
+import requests
+import time
+from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
+
+# Trading parameters for all symbols
+trading_params = {
+    "market_type": "FUTURES",
+    "margin_mode": "isolated",
+    "leverage": 10
+}
+
+# Fetch symbols dynamically from CoinEx API
+def fetch_coinex_symbols():
+    url = "https://api.coinex.com/v2/futures/market"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Store symbol info including min_amount
+        symbols_info = {
+            s['market']: float(s['min_amount']) 
+            for s in data['data'] 
+            if s['quote_ccy'] == 'USDT' and s['is_market_available']
+        }
+        return symbols_info
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching symbols from CoinEx: {e}")
+        return {}
+
+# Create a CoinEx client with trading parameters
+exchange = ccxt.coinex({
+    'apiKey': COINEX_API_KEY,
+    'secret': COINEX_API_SECRET,
+    'options': {
+        'defaultType': 'swap',  # For perpetual futures contracts
+    },
+    'enableRateLimit': True
+})
+
+# Define EMA strategy parameters
+short_ema_period = 5
+long_ema_period = 10
+
+# Get initial symbols and their min_amounts
+symbols_info = fetch_coinex_symbols()
+symbols = list(symbols_info.keys())
+
+# Track the last order type and open orders for each symbol
+last_order_types = {symbol: None for symbol in symbols}
+open_orders = {symbol: None for symbol in symbols}
+
+# Function to set trading parameters for a symbol
+def set_trading_parameters(symbol):
+    try:
+        if not symbol.endswith("USDT"):
+            raise ValueError(f"Invalid symbol format: {symbol}. Must end with 'USDT'")
+        
+        exchange.set_leverage(trading_params['leverage'], symbol)
+        exchange.set_margin_mode(trading_params['margin_mode'], symbol, {'leverage': trading_params['leverage']})
+        print(f"Set parameters for {symbol}: Leverage {trading_params['leverage']}x, {trading_params['margin_mode']} mode")
+    except Exception as e:
+        print(f"Error setting trading parameters for {symbol}: {e}")
+        return False
+    return True
+
+# Function to calculate EMA
+def calculate_ema(df, period, column='close'):
+    return df[column].ewm(span=period, adjust=False).mean()
+
+# Function to fetch historical data with EMA calculation
+def fetch_ohlcv(symbol, timeframe, limit):
+    try:
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['short_ema'] = calculate_ema(df, short_ema_period)
+        df['long_ema'] = calculate_ema(df, long_ema_period)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except Exception as e:
+        print(f"Error fetching OHLCV for {symbol}: {e}")
+        return None
+
+# Function to calculate quantity based on min_amount + 1%
+def calculate_quantity(symbol, latest_close):
+    min_amount = symbols_info.get(symbol, 0.0001)  # Default to 0.0001 if symbol not found
+    quantity = min_amount * 1.01  # Add 1% to min_amount
+    return quantity
+
+# Function to place a market buy order
+def place_market_buy_order(symbol, quantity, order_num):
+    try:
+        if not set_trading_parameters(symbol):
+            raise Exception("Failed to set trading parameters")
+        
+        order = exchange.create_market_buy_order(symbol, amount=quantity)
+        print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+        print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+        return order['id']
+    except Exception as e:
+        print(f"Order #{order_num} - Error placing Market Buy Order for {symbol}: {e}")
+        return None
+
+# Function to place a market sell order
+def place_market_sell_order(symbol, quantity, order_num):
+    try:
+        if not set_trading_parameters(symbol):
+            raise Exception("Failed to set trading parameters")
+        
+        order = exchange.create_market_sell_order(symbol, amount=quantity)
+        print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+        print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+        return order['id']
+    except Exception as e:
+        print(f"Order #{order_num} - Error placing Market Sell Order for {symbol}: {e}")
+        return None
+
+# Function to cancel an open order
+def cancel_open_order(symbol, order_id):
+    try:
+        if order_id:
+            exchange.cancel_order(order_id, symbol)
+            print(f"Cancelled open order for {symbol}: {order_id}")
+    except Exception as e:
+        print(f"Error cancelling order for {symbol}: {e}")
+
+# Main trading function
+def ema_strategy():
+    global symbols, symbols_info, last_order_types, open_orders
+    
+    while True:
+        try:
+            # Refresh symbols list every cycle
+            symbols_info = fetch_coinex_symbols()
+            symbols = list(symbols_info.keys())
+            
+            # Update tracking dictionaries
+            last_order_types = {symbol: last_order_types.get(symbol) for symbol in symbols}
+            open_orders = {symbol: open_orders.get(symbol) for symbol in symbols}
+            
+            trades_placed = 0
+
+            for i, symbol in enumerate(symbols, 1):
+                symbol = symbol.upper()
+                print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
+                
+                historical_data = fetch_ohlcv(symbol, time_interval, 100)
+                if historical_data is None or len(historical_data) < long_ema_period:
+                    print(f"Not enough data for {symbol}. Skipping...")
+                    continue
+
+                latest_candle = exchange.fetch_ticker(symbol)
+                if 'close' not in latest_candle:
+                    print(f"Error: 'close' not found in latest_candle for {symbol}")
+                    continue
+                
+                latest_close = float(latest_candle['close'])
+                if latest_close is None:
+                    print(f"Error: latest_close is None for {symbol}")
+                    continue
+
+                quantity = calculate_quantity(symbol, latest_close)
+                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
+
+                if open_orders.get(symbol):
+                    cancel_open_order(symbol, open_orders[symbol])
+                    open_orders[symbol] = None
+
+                if (historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1] and
+                    last_order_types.get(symbol) != 'BUY'):
+                    print(f'{symbol} Buy Signal (Crossover)')
+                    trades_placed += 1
+                    order_id = place_market_buy_order(symbol, quantity, trades_placed)
+                    if order_id:
+                        open_orders[symbol] = order_id
+                        last_order_types[symbol] = 'BUY'
+                
+                elif (historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1] and
+                      last_order_types.get(symbol) != 'SELL'):
+                    print(f'{symbol} Sell Signal (Crossunder)')
+                    trades_placed += 1
+                    order_id = place_market_sell_order(symbol, quantity, trades_placed)
+                    if order_id:
+                        open_orders[symbol] = order_id
+                        last_order_types[symbol] = 'SELL'
+
+            print(f"\nCycle completed. Total trades placed: {trades_placed}")
+            print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
+            time.sleep(300)
+            
+        except Exception as e:
+            print(f'An error occurred in cycle: {e}')
+            time.sleep(60)
+
+# Run the trading strategy
+if symbols:
+    ema_strategy()
+else:
+    print("No symbols available to trade. Exiting...")
