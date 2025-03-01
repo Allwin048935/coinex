@@ -1,6 +1,6 @@
 COINEX_API_KEY = 'B49826D1B36B4A1ABF02DF0A30AF2FD3'
 COINEX_API_SECRET = '754B822312C702ABCA0A4A0DBA224143DF23173362DDF338'
-time_interval = '1d'
+time_interval = '1m'
 
 # List of futures trading pairs (symbols)
 symbols = [
