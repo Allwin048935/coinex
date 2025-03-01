@@ -3,11 +3,20 @@ import pandas as pd
 import time
 from config import COINEX_API_KEY, COINEX_API_SECRET, symbols, time_interval
 
-# Create a CoinEx client
+# Trading parameters for all symbols
+trading_params = {
+    "market_type": "FUTURES",
+    "margin_mode": "isolated",
+    "leverage": 10
+}
+
+# Create a CoinEx client with trading parameters
 exchange = ccxt.coinex({
     'apiKey': COINEX_API_KEY,
     'secret': COINEX_API_SECRET,
-    'options': {'defaultType': 'swap'},
+    'options': {
+        'defaultType': 'swap',  # For perpetual futures contracts
+    },
     'enableRateLimit': True
 })
 
@@ -21,6 +30,22 @@ open_orders = {symbol: None for symbol in symbols}
 
 # Fixed quantity in USDT worth of contracts
 fixed_quantity_usdt = 10
+
+# Function to set trading parameters for a symbol
+def set_trading_parameters(symbol):
+    try:
+        # Ensure symbol is in uppercase futures format (e.g., "CETUSDT")
+        if not symbol.endswith("USDT"):
+            raise ValueError(f"Invalid symbol format: {symbol}. Must end with 'USDT'")
+        
+        # Set leverage and margin mode for futures trading
+        exchange.set_leverage(trading_params['leverage'], symbol)
+        exchange.set_margin_mode(trading_params['margin_mode'], symbol, {'leverage': trading_params['leverage']})
+        print(f"Set parameters for {symbol}: Leverage {trading_params['leverage']}x, {trading_params['margin_mode']} mode")
+    except Exception as e:
+        print(f"Error setting trading parameters for {symbol}: {e}")
+        return False
+    return True
 
 # Function to calculate EMA
 def calculate_ema(df, period, column='close'):
@@ -40,21 +65,29 @@ def fetch_ohlcv(symbol, timeframe, limit):
         print(f"Error fetching OHLCV for {symbol}: {e}")
         return None
 
-# Function to place a market buy order
+# Function to place a market buy order with trading parameters
 def place_market_buy_order(symbol, quantity, order_num):
     try:
+        if not set_trading_parameters(symbol):
+            raise Exception("Failed to set trading parameters")
+        
         order = exchange.create_market_buy_order(symbol, amount=quantity)
         print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+        print(f"Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
         return order['id']
     except Exception as e:
         print(f"Order #{order_num} - Error placing Market Buy Order for {symbol}: {e}")
         return None
 
-# Function to place a market sell order
+# Function to place a market sell order with trading parameters
 def place_market_sell_order(symbol, quantity, order_num):
     try:
+        if not set_trading_parameters(symbol):
+            raise Exception("Failed to set trading parameters")
+        
         order = exchange.create_market_sell_order(symbol, amount=quantity)
         print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+        print(f"Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
         return order['id']
     except Exception as e:
         print(f"Order #{order_num} - Error placing Market Sell Order for {symbol}: {e}")
@@ -76,9 +109,11 @@ def ema_strategy():
             trades_placed = 0
 
             for i, symbol in enumerate(symbols, 1):
+                # Ensure symbol is in uppercase
+                symbol = symbol.upper()
                 print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
+                
                 historical_data = fetch_ohlcv(symbol, time_interval, 100)
-
                 if historical_data is None or len(historical_data) < long_ema_period:
                     print(f"Not enough data for {symbol}. Skipping...")
                     continue
