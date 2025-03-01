@@ -8,7 +8,7 @@ from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 trading_params = {
     "market_type": "FUTURES",
     "margin_mode": "isolated",
-    "leverage": 10
+    "leverage": 3
 }
 
 # Fetch symbols dynamically from CoinEx API
@@ -38,8 +38,8 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 5
-long_ema_period = 10
+short_ema_period = 3
+long_ema_period = 20
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -210,7 +210,7 @@ def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
-            time.sleep(300)
+            time.sleep(1800)
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
