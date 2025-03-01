@@ -3,11 +3,23 @@ import pandas as pd
 import time
 from config import COINEX_API_KEY, COINEX_API_SECRET, symbols, time_interval
 
-# Create a CoinEx client
+# Trading parameters
+trading_params = {
+    "market": "CETUSDT",
+    "market_type": "FUTURES",
+    "margin_mode": "isolated",
+    "leverage": 10
+}
+
+# Create a CoinEx client with trading parameters
 exchange = ccxt.coinex({
     'apiKey': COINEX_API_KEY,
     'secret': COINEX_API_SECRET,
-    'options': {'defaultType': 'swap'},
+    'options': {
+        'defaultType': 'swap',
+        'marginMode': trading_params['margin_mode'],
+        'leverage': trading_params['leverage']
+    },
     'enableRateLimit': True
 })
 
@@ -19,34 +31,8 @@ long_ema_period = 10
 last_order_types = {symbol: None for symbol in symbols}
 open_orders = {symbol: None for symbol in symbols}
 
-# Leverage setting
-desired_leverage = 3  # Leverage set to 3x
-
-# Function to fetch market info for a symbol (minimum quantity and precision)
-def fetch_market_info(symbol):
-    try:
-        markets = exchange.fetch_markets()
-        for market in markets:
-            if market['symbol'] == symbol:
-                return {
-                    'min_amount': float(market.get('limits', {}).get('amount', {}).get('min', 0.0005)),
-                    'base_ccy_precision': market.get('precision', {}).get('amount', 8),
-                }
-        print(f"Market info not found for {symbol}. Using defaults.")
-        return {'min_amount': 0.0005, 'base_ccy_precision': 8}
-    except Exception as e:
-        print(f"Error fetching market info for {symbol}: {e}")
-        return {'min_amount': 0.0005, 'base_ccy_precision': 8}
-
-# Function to set leverage for a symbol
-def set_leverage(symbol, leverage):
-    try:
-        exchange.set_leverage(leverage, symbol)
-        print(f"Leverage set to {leverage}x for {symbol}")
-        return True
-    except Exception as e:
-        print(f"Error setting leverage for {symbol}: {e}")
-        return False
+# Fixed quantity in USDT worth of contracts
+fixed_quantity_usdt = 10
 
 # Function to calculate EMA
 def calculate_ema(df, period, column='close'):
@@ -66,31 +52,31 @@ def fetch_ohlcv(symbol, timeframe, limit):
         print(f"Error fetching OHLCV for {symbol}: {e}")
         return None
 
-# Function to adjust quantity to precision
-def adjust_quantity(quantity, precision, price):
-    adjusted = round(float(quantity), precision)
-    position_size = adjusted * price
-    margin_required = position_size / desired_leverage
-    print(f"Adjusted Qty: {adjusted} (Precision: {precision}), Position Size: ${position_size:.2f} USDT, Margin: ${margin_required:.2f} USDT")
-    return adjusted
-
-# Function to place a market buy order
-def place_market_buy_order(symbol, quantity, order_num, market_info, price):
+# Function to place a market buy order with trading parameters
+def place_market_buy_order(symbol, quantity, order_num):
     try:
-        adjusted_quantity = adjust_quantity(quantity, market_info['base_ccy_precision'], price)
-        order = exchange.create_market_buy_order(symbol, amount=adjusted_quantity)
-        print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']} (Qty: {adjusted_quantity})")
+        # Set leverage and margin mode before placing order
+        exchange.set_leverage(trading_params['leverage'], symbol)
+        exchange.set_margin_mode(trading_params['margin_mode'], symbol)
+        
+        order = exchange.create_market_buy_order(symbol, amount=quantity)
+        print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+        print(f"Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
         return order['id']
     except Exception as e:
         print(f"Order #{order_num} - Error placing Market Buy Order for {symbol}: {e}")
         return None
 
-# Function to place a market sell order
-def place_market_sell_order(symbol, quantity, order_num, market_info, price):
+# Function to place a market sell order with trading parameters
+def place_market_sell_order(symbol, quantity, order_num):
     try:
-        adjusted_quantity = adjust_quantity(quantity, market_info['base_ccy_precision'], price)
-        order = exchange.create_market_sell_order(symbol, amount=adjusted_quantity)
-        print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']} (Qty: {adjusted_quantity})")
+        # Set leverage and margin mode before placing order
+        exchange.set_leverage(trading_params['leverage'], symbol)
+        exchange.set_margin_mode(trading_params['margin_mode'], symbol)
+        
+        order = exchange.create_market_sell_order(symbol, amount=quantity)
+        print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+        print(f"Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
         return order['id']
     except Exception as e:
         print(f"Order #{order_num} - Error placing Market Sell Order for {symbol}: {e}")
@@ -105,24 +91,16 @@ def cancel_open_order(symbol, order_id):
     except Exception as e:
         print(f"Error cancelling order for {symbol}: {e}")
 
-# Main trading function with minimum contract quantity
+# Main trading function with individual orders and debug
 def ema_strategy():
-    # Pre-fetch market info and set leverage at startup
-    market_info_dict = {}
-    for symbol in symbols:
-        market_info_dict[symbol] = fetch_market_info(symbol)
-        set_leverage(symbol, desired_leverage)
-    
     while True:
         try:
             trades_placed = 0
 
             for i, symbol in enumerate(symbols, 1):
                 print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
-                market_info = market_info_dict[symbol]
-                print(f"Market Constraints: Min Amount={market_info['min_amount']}, Precision={market_info['base_ccy_precision']}")
-
                 historical_data = fetch_ohlcv(symbol, time_interval, 100)
+
                 if historical_data is None or len(historical_data) < long_ema_period:
                     print(f"Not enough data for {symbol}. Skipping...")
                     continue
@@ -137,9 +115,8 @@ def ema_strategy():
                     print(f"Error: latest_close is None for {symbol}")
                     continue
 
-                # Use minimum contract quantity instead of fixed USDT amount
-                quantity = market_info['min_amount']
-                print(f"Symbol: {symbol}, Latest Close: ${latest_close}, Min Contract Qty: {quantity}")
+                quantity = fixed_quantity_usdt / latest_close
+                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Quantity: {quantity}")
 
                 if open_orders[symbol]:
                     cancel_open_order(symbol, open_orders[symbol])
@@ -149,7 +126,7 @@ def ema_strategy():
                     last_order_types[symbol] != 'BUY'):
                     print(f'{symbol} Buy Signal (Crossover)')
                     trades_placed += 1
-                    order_id = place_market_buy_order(symbol, quantity, trades_placed, market_info, latest_close)
+                    order_id = place_market_buy_order(symbol, quantity, trades_placed)
                     if order_id:
                         open_orders[symbol] = order_id
                         last_order_types[symbol] = 'BUY'
@@ -160,7 +137,7 @@ def ema_strategy():
                       last_order_types[symbol] != 'SELL'):
                     print(f'{symbol} Sell Signal (Crossunder)')
                     trades_placed += 1
-                    order_id = place_market_sell_order(symbol, quantity, trades_placed, market_info, latest_close)
+                    order_id = place_market_sell_order(symbol, quantity, trades_placed)
                     if order_id:
                         open_orders[symbol] = order_id
                         last_order_types[symbol] = 'SELL'
