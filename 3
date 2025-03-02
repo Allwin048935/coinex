@@ -87,31 +87,57 @@ def calculate_quantity(symbol, latest_close):
     quantity = min_amount * 1.01
     return quantity
 
-# Function to place a market buy order
-def place_market_buy_order(symbol, quantity, order_num):
+# Function to check current position
+def check_position(symbol):
     try:
-        if not set_trading_parameters(symbol):
-            raise Exception("Failed to set trading parameters")
-        order = exchange.create_market_buy_order(symbol, amount=quantity)
-        print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
-        print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
-        return order['id']
+        positions = exchange.fetch_positions([symbol])
+        for pos in positions:
+            if pos['symbol'] == symbol and float(pos['contracts']) > 0:
+                return pos['side'].lower(), float(pos['contracts'])
+        return None, 0
     except Exception as e:
-        print(f"Order #{order_num} - Error placing Market Buy Order for {symbol}: {e}")
-        return None
+        print(f"Error checking position for {symbol}: {e}")
+        return None, 0
 
-# Function to place a market sell order
-def place_market_sell_order(symbol, quantity, order_num):
-    try:
-        if not set_trading_parameters(symbol):
-            raise Exception("Failed to set trading parameters")
-        order = exchange.create_market_sell_order(symbol, amount=quantity)
-        print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
-        print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
-        return order['id']
-    except Exception as e:
-        print(f"Order #{order_num} - Error placing Market Sell Order for {symbol}: {e}")
-        return None
+# Function to place a market buy order with retry logic
+def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=5):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if not set_trading_parameters(symbol):
+                raise Exception("Failed to set trading parameters")
+            order = exchange.create_market_buy_order(symbol, amount=quantity)
+            print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+            print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+            return order['id']
+        except Exception as e:
+            attempt += 1
+            print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+    print(f"Order #{order_num} - Failed to place Market Buy Order for {symbol} after {retries} attempts.")
+    return None
+
+# Function to place a market sell order with retry logic
+def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=5):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if not set_trading_parameters(symbol):
+                raise Exception("Failed to set trading parameters")
+            order = exchange.create_market_sell_order(symbol, amount=quantity)
+            print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+            print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+            return order['id']
+        except Exception as e:
+            attempt += 1
+            print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+    print(f"Order #{order_num} - Failed to place Market Sell Order for {symbol} after {retries} attempts.")
+    return None
 
 # Function to cancel an open order
 def cancel_open_order(symbol, order_id):
@@ -161,7 +187,7 @@ def ema_strategy():
                 quantity = calculate_quantity(symbol, latest_close)
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
-                # Check EMA conditions first
+                # Check EMA conditions
                 if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
                     current_signal = 'long'
                     print(f'{symbol} Potential Buy Signal (Crossover)')
@@ -175,19 +201,37 @@ def ema_strategy():
 
                 # Handle existing orders and new signals
                 if current_signal and last_signals.get(symbol) != current_signal:
-                    # Cancel any conflicting open order
-                    if open_orders.get(symbol):
-                        current_order_type = last_order_types.get(symbol)
-                        if (current_signal == 'long' and current_order_type == 'SELL') or \
-                           (current_signal == 'short' and current_order_type == 'BUY'):
-                            cancel_open_order(symbol, open_orders[symbol])
+                    # Step 1: Check and close existing position if conflicting
+                    position_side, position_size = check_position(symbol)
+                    if position_side:
+                        if (current_signal == 'long' and position_side == 'short') or \
+                           (current_signal == 'short' and position_side == 'long'):
+                            trades_placed += 1
+                            if position_side == 'short':
+                                # Close short position with a buy order
+                                close_order_id = place_market_buy_order(symbol, position_size, trades_placed)
+                                if close_order_id:
+                                    print(f"Closed short position for {symbol} with order {close_order_id}")
+                                else:
+                                    print(f"Failed to close short position for {symbol}. Skipping new order.")
+                                    continue
+                            elif position_side == 'long':
+                                # Close long position with a sell order
+                                close_order_id = place_market_sell_order(symbol, position_size, trades_placed)
+                                if close_order_id:
+                                    print(f"Closed long position for {symbol} with order {close_order_id}")
+                                else:
+                                    print(f"Failed to close long position for {symbol}. Skipping new order.")
+                                    continue
+                            # Cancel any open order after closing position
+                            if open_orders.get(symbol):
+                                cancel_open_order(symbol, open_orders[symbol])
                             open_orders[symbol] = None
-                            print(f"Cancelled conflicting order for {symbol} to switch position")
+                            last_order_types[symbol] = None
 
-                    # Update signal before placing new order
+                    # Step 2: Update signal and place new order
                     last_signals[symbol] = current_signal
                     
-                    # Place new order based on signal
                     if current_signal == 'long':
                         trades_placed += 1
                         order_id = place_market_buy_order(symbol, quantity, trades_placed)
@@ -195,8 +239,7 @@ def ema_strategy():
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'BUY'
                         else:
-                            print(f"Failed to place buy order for {symbol}, signal updated anyway")
-                    
+                            print(f"Failed to place new buy order for {symbol} after retries.")
                     elif current_signal == 'short':
                         trades_placed += 1
                         order_id = place_market_sell_order(symbol, quantity, trades_placed)
@@ -204,12 +247,12 @@ def ema_strategy():
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'SELL'
                         else:
-                            print(f"Failed to place sell order for {symbol}, signal updated anyway")
+                            print(f"Failed to place new sell order for {symbol} after retries.")
                 else:
                     print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
-            print(f"Processed {len(symbols)} pairs. Sleeping for 5 minutes...")
+            print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
             time.sleep(1800)
             
         except Exception as e:
