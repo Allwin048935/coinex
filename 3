@@ -100,7 +100,7 @@ def check_position(symbol):
         return None, 0
 
 # Function to place a market buy order with retry logic
-def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=5):
+def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=3):
     attempt = 0
     while attempt < retries:
         try:
