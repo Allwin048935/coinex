@@ -100,7 +100,7 @@ def check_position(symbol):
         return None, 0
 
 # Function to place a market buy order with retry logic
-def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=3):
+def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=2):
     attempt = 0
     while attempt < retries:
         try:
@@ -120,7 +120,7 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=3):
     return None
 
 # Function to place a market sell order with retry logic
-def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=3):
+def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=2):
     attempt = 0
     while attempt < retries:
         try:
@@ -253,7 +253,7 @@ def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            time.sleep(1200)
+            time.sleep(1800)
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
