@@ -114,32 +114,36 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
             if not set_trading_parameters(symbol):
                 raise Exception("Failed to set trading parameters")
             
-            # Calculate TP and SL prices
-            ticker = exchange.fetch_ticker(symbol)
-            entry_price = float(ticker['last'])
-            tp_price = entry_price * trading_params['trade_levels']['long_take_profit']
-            sl_price = entry_price * trading_params['trade_levels']['long_stop_loss']
-            
-            # Place market buy order with embedded TP/SL
-            order = exchange.create_market_buy_order(
-                symbol,
-                amount=quantity,
-                params={
-                    'take_profit_price': str(tp_price),
-                    'stop_loss_price': str(sl_price),
-                    'take_profit_type': 'mark_price',
-                    'stop_loss_type': 'mark_price'
-                }
-            )
+            # Place the market buy order
+            order = exchange.create_market_buy_order(symbol, amount=quantity)
+            entry_price = float(order['price']) if order['price'] else float(exchange.fetch_ticker(symbol)['last'])
             
             print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
-            print(f"Take-Profit set at {tp_price} (mark_price), Stop-Loss set at {sl_price} (mark_price)")
+
+            # Calculate TP and SL prices
+            tp_price = entry_price * trading_params['trade_levels']['long_take_profit']
+            sl_price = entry_price * trading_params['trade_levels']['long_stop_loss']
+            
+            # Place Take-Profit (Sell Limit)
+            tp_order = exchange.create_order(
+                symbol, 'limit', 'sell', quantity, tp_price,
+                params={'reduce_only': True}
+            )
+            
+            # Place Stop-Loss (Sell Stop Market)
+            sl_order = exchange.create_order(
+                symbol, 'stop_market', 'sell', quantity,
+                params={'stopPrice': sl_price, 'reduce_only': True}
+            )
+            
+            print(f"Take-Profit Order created for {symbol}: {tp_order['id']} at {tp_price}")
+            print(f"Stop-Loss Order created for {symbol}: {sl_order['id']} at {sl_price}")
             
             return order['id']
         except Exception as e:
             attempt += 1
-            print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            print(f"Order #{order_num} - Error placing Market Buy Order or SL/TP for {symbol} (Attempt {attempt}/{retries}): {e}")
             if attempt < retries:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
@@ -154,32 +158,36 @@ def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
             if not set_trading_parameters(symbol):
                 raise Exception("Failed to set trading parameters")
             
-            # Calculate TP and SL prices
-            ticker = exchange.fetch_ticker(symbol)
-            entry_price = float(ticker['last'])
-            tp_price = entry_price * trading_params['trade_levels']['short_take_profit']
-            sl_price = entry_price * trading_params['trade_levels']['short_stop_loss']
-            
-            # Place market sell order with embedded TP/SL
-            order = exchange.create_market_sell_order(
-                symbol,
-                amount=quantity,
-                params={
-                    'take_profit_price': str(tp_price),
-                    'stop_loss_price': str(sl_price),
-                    'take_profit_type': 'mark_price',
-                    'stop_loss_type': 'mark_price'
-                }
-            )
+            # Place the market sell order
+            order = exchange.create_market_sell_order(symbol, amount=quantity)
+            entry_price = float(order['price']) if order['price'] else float(exchange.fetch_ticker(symbol)['last'])
             
             print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
-            print(f"Take-Profit set at {tp_price} (mark_price), Stop-Loss set at {sl_price} (mark_price)")
+
+            # Calculate TP and SL prices
+            tp_price = entry_price * trading_params['trade_levels']['short_take_profit']
+            sl_price = entry_price * trading_params['trade_levels']['short_stop_loss']
+            
+            # Place Take-Profit (Buy Limit)
+            tp_order = exchange.create_order(
+                symbol, 'limit', 'buy', quantity, tp_price,
+                params={'reduce_only': True}
+            )
+            
+            # Place Stop-Loss (Buy Stop Market)
+            sl_order = exchange.create_order(
+                symbol, 'stop_market', 'buy', quantity,
+                params={'stopPrice': sl_price, 'reduce_only': True}
+            )
+            
+            print(f"Take-Profit Order created for {symbol}: {tp_order['id']} at {tp_price}")
+            print(f"Stop-Loss Order created for {symbol}: {sl_order['id']} at {sl_price}")
             
             return order['id']
         except Exception as e:
             attempt += 1
-            print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            print(f"Order #{order_num} - Error placing Market Sell Order or SL/TP for {symbol} (Attempt {attempt}/{retries}): {e}")
             if attempt < retries:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
