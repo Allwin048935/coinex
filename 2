@@ -3,6 +3,8 @@ import pandas as pd
 import requests
 import time
 import schedule
+import hmac
+import hashlib
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
@@ -106,6 +108,78 @@ def check_position(symbol):
         print(f"Error checking position for {symbol}: {e}")
         return None, 0
 
+# Function to generate signature for CoinEx API
+def generate_signature(params, secret):
+    param_str = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
+    signature = hmac.new(
+        secret.encode('utf-8'),
+        param_str.encode('utf-8'),
+        hashlib.md5
+    ).hexdigest().upper()
+    return signature
+
+# Function to set take-profit via CoinEx API
+def set_take_profit(position_id, symbol, tp_price, stop_type=3):
+    url = "https://api.coinex.com/perpetual/v1/position/take_profit"
+    timestamp = int(time.time() * 1000)  # Current time in milliseconds
+    params = {
+        "market": symbol,
+        "position_id": position_id,
+        "stop_type": stop_type,  # 3 = mark price
+        "take_profit_price": str(tp_price),
+        "timestamp": timestamp
+    }
+    signature = generate_signature(params, COINEX_API_SECRET)
+    headers = {
+        "Authorization": signature,
+        "AccessId": COINEX_API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    try:
+        response = requests.post(url, data=params, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") == 0:
+            print(f"Take-Profit set for {symbol}: position_id={position_id}, TP={tp_price}")
+            return True
+        else:
+            print(f"Error setting TP for {symbol}: {data.get('message')}")
+            return False
+    except Exception as e:
+        print(f"Exception setting TP for {symbol}: {e}")
+        return False
+
+# Function to set stop-loss via CoinEx API
+def set_stop_loss(position_id, symbol, sl_price, stop_type=3):
+    url = "https://api.coinex.com/perpetual/v1/position/stop_loss"
+    timestamp = int(time.time() * 1000)  # Current time in milliseconds
+    params = {
+        "market": symbol,
+        "position_id": position_id,
+        "stop_type": stop_type,  # 3 = mark price
+        "stop_loss_price": str(sl_price),
+        "timestamp": timestamp
+    }
+    signature = generate_signature(params, COINEX_API_SECRET)
+    headers = {
+        "Authorization": signature,
+        "AccessId": COINEX_API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    try:
+        response = requests.post(url, data=params, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") == 0:
+            print(f"Stop-Loss set for {symbol}: position_id={position_id}, SL={sl_price}")
+            return True
+        else:
+            print(f"Error setting SL for {symbol}: {data.get('message')}")
+            return False
+    except Exception as e:
+        print(f"Exception setting SL for {symbol}: {e}")
+        return False
+
 # Function to place a market buy order with SL/TP
 def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
     attempt = 0
@@ -120,23 +194,29 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
             tp_price = entry_price * trading_params['trade_levels']['long_take_profit']
             sl_price = entry_price * trading_params['trade_levels']['long_stop_loss']
             
-            # Place market buy order with TP/SL embedded
-            order = exchange.create_market_buy_order(
-                symbol,
-                amount=quantity,
-                params={
-                    'take_profit_price': str(tp_price),
-                    'stop_loss_price': str(sl_price),
-                    'take_profit_type': 'mark_price',
-                    'stop_loss_type': 'mark_price'
-                }
-            )
-            
-            print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+            # Place market buy order (no TP/SL in params)
+            order = exchange.create_market_buy_order(symbol, amount=quantity)
+            order_id = order['id']
+            print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order_id}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
-            print(f"Take-Profit set at {tp_price} (mark_price), Stop-Loss set at {sl_price} (mark_price)")
             
-            return order['id']
+            # Fetch position to get position_id
+            time.sleep(1)  # Brief delay to ensure position is registered
+            position_side, position_size = check_position(symbol)
+            if position_side == 'long':
+                positions = exchange.fetch_positions([symbol])
+                for pos in positions:
+                    if pos['symbol'] == symbol and float(pos['contracts']) > 0:
+                        position_id = pos.get('id')  # Adjust key if needed based on CCXT response
+                        break
+                else:
+                    raise Exception("Position not found after order placement")
+                
+                # Set TP and SL separately
+                set_take_profit(position_id, symbol, tp_price, stop_type=3)
+                set_stop_loss(position_id, symbol, sl_price, stop_type=3)
+            
+            return order_id
         except Exception as e:
             attempt += 1
             print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
@@ -160,23 +240,29 @@ def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
             tp_price = entry_price * trading_params['trade_levels']['short_take_profit']
             sl_price = entry_price * trading_params['trade_levels']['short_stop_loss']
             
-            # Place market sell order with TP/SL embedded
-            order = exchange.create_market_sell_order(
-                symbol,
-                amount=quantity,
-                params={
-                    'take_profit_price': str(tp_price),
-                    'stop_loss_price': str(sl_price),
-                    'take_profit_type': 'mark_price',
-                    'stop_loss_type': 'mark_price'
-                }
-            )
-            
-            print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+            # Place market sell order (no TP/SL in params)
+            order = exchange.create_market_sell_order(symbol, amount=quantity)
+            order_id = order['id']
+            print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order_id}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
-            print(f"Take-Profit set at {tp_price} (mark_price), Stop-Loss set at {sl_price} (mark_price)")
             
-            return order['id']
+            # Fetch position to get position_id
+            time.sleep(1)  # Brief delay to ensure position is registered
+            position_side, position_size = check_position(symbol)
+            if position_side == 'short':
+                positions = exchange.fetch_positions([symbol])
+                for pos in positions:
+                    if pos['symbol'] == symbol and float(pos['contracts']) > 0:
+                        position_id = pos.get('id')  # Adjust key if needed based on CCXT response
+                        break
+                else:
+                    raise Exception("Position not found after order placement")
+                
+                # Set TP and SL separately
+                set_take_profit(position_id, symbol, tp_price, stop_type=3)
+                set_stop_loss(position_id, symbol, sl_price, stop_type=3)
+            
+            return order_id
         except Exception as e:
             attempt += 1
             print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
