@@ -121,24 +121,38 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
             print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
 
+            # Fetch position to get position_id
+            positions = exchange.fetch_positions([symbol])
+            position_id = None
+            for pos in positions:
+                if pos['symbol'] == symbol and pos['side'] == 'long' and float(pos['contracts']) > 0:
+                    position_id = pos['info']['position_id']
+                    break
+            if not position_id:
+                raise Exception("Failed to retrieve position_id for stop-loss")
+
             # Calculate TP and SL prices
             tp_price = entry_price * trading_params['trade_levels']['long_take_profit']
             sl_price = entry_price * trading_params['trade_levels']['long_stop_loss']
             
-            # Place Take-Profit (Sell Limit)
-            tp_order = exchange.create_order(
-                symbol, 'limit', 'sell', quantity, tp_price,
-                params={'reduce_only': True}
-            )
+            # Set Stop-Loss via CoinEx API
+            sl_response = exchange.private_post_futures_set_position_stop_loss({
+                'market': symbol,
+                'market_type': 'FUTURES',
+                'stop_loss_type': 'mark_price',
+                'stop_loss_price': str(sl_price)
+            })
             
-            # Place Stop-Loss (Sell Stop Market)
-            sl_order = exchange.create_order(
-                symbol, 'stop_market', 'sell', quantity,
-                params={'stopPrice': sl_price, 'reduce_only': True}
-            )
+            # Set Take-Profit via CoinEx API (assuming similar endpoint)
+            tp_response = exchange.private_post_futures_set_position_take_profit({
+                'market': symbol,
+                'market_type': 'FUTURES',
+                'take_profit_type': 'mark_price',
+                'take_profit_price': str(tp_price)
+            })
             
-            print(f"Take-Profit Order created for {symbol}: {tp_order['id']} at {tp_price}")
-            print(f"Stop-Loss Order created for {symbol}: {sl_order['id']} at {sl_price}")
+            print(f"Take-Profit set for {symbol} at {tp_price} (mark_price)")
+            print(f"Stop-Loss set for {symbol} at {sl_price} (mark_price)")
             
             return order['id']
         except Exception as e:
@@ -165,24 +179,38 @@ def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
             print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}, Entry Price: {entry_price}")
 
+            # Fetch position to get position_id
+            positions = exchange.fetch_positions([symbol])
+            position_id = None
+            for pos in positions:
+                if pos['symbol'] == symbol and pos['side'] == 'short' and float(pos['contracts']) > 0:
+                    position_id = pos['info']['position_id']
+                    break
+            if not position_id:
+                raise Exception("Failed to retrieve position_id for stop-loss")
+
             # Calculate TP and SL prices
             tp_price = entry_price * trading_params['trade_levels']['short_take_profit']
             sl_price = entry_price * trading_params['trade_levels']['short_stop_loss']
             
-            # Place Take-Profit (Buy Limit)
-            tp_order = exchange.create_order(
-                symbol, 'limit', 'buy', quantity, tp_price,
-                params={'reduce_only': True}
-            )
+            # Set Stop-Loss via CoinEx API
+            sl_response = exchange.private_post_futures_set_position_stop_loss({
+                'market': symbol,
+                'market_type': 'FUTURES',
+                'stop_loss_type': 'mark_price',
+                'stop_loss_price': str(sl_price)
+            })
             
-            # Place Stop-Loss (Buy Stop Market)
-            sl_order = exchange.create_order(
-                symbol, 'stop_market', 'buy', quantity,
-                params={'stopPrice': sl_price, 'reduce_only': True}
-            )
+            # Set Take-Profit via CoinEx API (assuming similar endpoint)
+            tp_response = exchange.private_post_futures_set_position_take_profit({
+                'market': symbol,
+                'market_type': 'FUTURES',
+                'take_profit_type': 'mark_price',
+                'take_profit_price': str(tp_price)
+            })
             
-            print(f"Take-Profit Order created for {symbol}: {tp_order['id']} at {tp_price}")
-            print(f"Stop-Loss Order created for {symbol}: {sl_order['id']} at {sl_price}")
+            print(f"Take-Profit set for {symbol} at {tp_price} (mark_price)")
+            print(f"Stop-Loss set for {symbol} at {sl_price} (mark_price)")
             
             return order['id']
         except Exception as e:
