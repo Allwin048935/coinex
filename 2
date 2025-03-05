@@ -118,67 +118,85 @@ def generate_signature(params, secret):
     ).hexdigest().upper()
     return signature
 
-# Function to set take-profit via CoinEx API
-def set_take_profit(position_id, symbol, tp_price, stop_type=3):
+# Updated Function to set take-profit via CoinEx API
+def set_take_profit(position_id, symbol, tp_price, stop_type=3, retries=3, delay=1):
     url = "https://api.coinex.com/perpetual/v1/position/take_profit"
-    timestamp = int(time.time() * 1000)  # Current time in milliseconds
-    params = {
-        "market": symbol,
-        "position_id": position_id,
-        "stop_type": stop_type,  # 3 = mark price
-        "take_profit_price": str(tp_price),
-        "timestamp": timestamp
-    }
-    signature = generate_signature(params, COINEX_API_SECRET)
-    headers = {
-        "Authorization": signature,
-        "AccessId": COINEX_API_KEY,
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    try:
-        response = requests.post(url, data=params, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == 0:
-            print(f"Take-Profit set for {symbol}: position_id={position_id}, TP={tp_price}")
-            return True
-        else:
-            print(f"Error setting TP for {symbol}: {data.get('message')}")
-            return False
-    except Exception as e:
-        print(f"Exception setting TP for {symbol}: {e}")
-        return False
+    attempt = 0
+    while attempt < retries:
+        try:
+            timestamp = int(time.time() * 1000)  # Current time in milliseconds
+            params = {
+                "market": symbol,
+                "position_id": position_id,
+                "stop_type": stop_type,  # 1: Transaction price, 3: Mark price
+                "take_profit_price": str(tp_price),
+                "timestamp": timestamp
+            }
+            signature = generate_signature(params, COINEX_API_SECRET)
+            headers = {
+                "Authorization": signature,
+                "AccessId": COINEX_API_KEY,
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            response = requests.post(url, data=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("code") == 0:
+                tp_set = data['data']['take_profit_price']
+                unreal_profit = data['data']['profit_unreal']
+                print(f"Take-Profit set for {symbol}: position_id={position_id}, TP={tp_set} (requested {tp_price}), Unrealized PNL={unreal_profit}")
+                return True
+            else:
+                print(f"Error setting TP for {symbol}: {data.get('message')}")
+                return False
+        except Exception as e:
+            attempt += 1
+            print(f"Attempt {attempt}/{retries} failed setting TP for {symbol}: {e}")
+            if attempt < retries:
+                time.sleep(delay)
+    print(f"Failed to set TP for {symbol} after {retries} attempts")
+    return False
 
-# Function to set stop-loss via CoinEx API
-def set_stop_loss(position_id, symbol, sl_price, stop_type=3):
+# Updated Function to set stop-loss via CoinEx API
+def set_stop_loss(position_id, symbol, sl_price, stop_type=3, retries=3, delay=1):
     url = "https://api.coinex.com/perpetual/v1/position/stop_loss"
-    timestamp = int(time.time() * 1000)  # Current time in milliseconds
-    params = {
-        "market": symbol,
-        "position_id": position_id,
-        "stop_type": stop_type,  # 3 = mark price
-        "stop_loss_price": str(sl_price),
-        "timestamp": timestamp
-    }
-    signature = generate_signature(params, COINEX_API_SECRET)
-    headers = {
-        "Authorization": signature,
-        "AccessId": COINEX_API_KEY,
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    try:
-        response = requests.post(url, data=params, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == 0:
-            print(f"Stop-Loss set for {symbol}: position_id={position_id}, SL={sl_price}")
-            return True
-        else:
-            print(f"Error setting SL for {symbol}: {data.get('message')}")
-            return False
-    except Exception as e:
-        print(f"Exception setting SL for {symbol}: {e}")
-        return False
+    attempt = 0
+    while attempt < retries:
+        try:
+            timestamp = int(time.time() * 1000)  # Current time in milliseconds
+            params = {
+                "market": symbol,
+                "position_id": position_id,
+                "stop_type": stop_type,  # 1: Transaction price, 3: Mark price
+                "stop_loss_price": str(sl_price),
+                "timestamp": timestamp
+            }
+            signature = generate_signature(params, COINEX_API_SECRET)
+            headers = {
+                "Authorization": signature,
+                "AccessId": COINEX_API_KEY,
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            response = requests.post(url, data=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("code") == 0:
+                sl_set = data['data']['stop_loss_price']
+                unreal_profit = data['data']['profit_unreal']
+                print(f"Stop-Loss set for {symbol}: position_id={position_id}, SL={sl_set} (requested {sl_price}), Unrealized PNL={unreal_profit}")
+                return True
+            else:
+                print(f"Error setting SL for {symbol}: {data.get('message')}")
+                return False
+        except Exception as e:
+            attempt += 1
+            print(f"Attempt {attempt}/{retries} failed setting SL for {symbol}: {e}")
+            if attempt < retries:
+                time.sleep(delay)
+    print(f"Failed to set SL for {symbol} after {retries} attempts")
+    return False
 
 # Function to place a market buy order with SL/TP
 def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
