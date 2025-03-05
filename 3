@@ -2,6 +2,8 @@ import ccxt
 import pandas as pd
 import requests
 import time
+import hmac
+import hashlib
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
@@ -11,6 +13,10 @@ trading_params = {
     "leverage": 3
 }
 
+# API endpoints
+TAKE_PROFIT_URL = "https://api.coinex.com/perpetual/v1/position/take_profit"
+STOP_LOSS_URL = "https://api.coinex.com/perpetual/v1/position/stop_loss"
+
 # Fetch symbols dynamically from CoinEx API
 def fetch_coinex_symbols():
     url = "https://api.coinex.com/v2/futures/market"
@@ -18,7 +24,6 @@ def fetch_coinex_symbols():
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        
         symbols_info = {
             s['market']: float(s['min_amount']) 
             for s in data['data'] 
@@ -49,6 +54,52 @@ symbols = list(symbols_info.keys())
 last_order_types = {symbol: None for symbol in symbols}
 open_orders = {symbol: None for symbol in symbols}
 last_signals = {symbol: None for symbol in symbols}
+
+# Function to generate signature (adjust as per CoinEx API documentation)
+def generate_signature(params, secret):
+    query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+    return hmac.new(secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+
+# Function to set take-profit and stop-loss
+def set_take_profit_stop_loss(symbol, side, entry_price):
+    headers = {
+        "Authorization": COINEX_API_KEY,
+        "AccessId": COINEX_API_KEY  # Adjust if AccessId is different from API key
+    }
+    
+    # Define take-profit and stop-loss prices (example logic, adjust as needed)
+    if side == 'long':
+        take_profit_price = str(entry_price * 1.05)  # 5% profit
+        stop_loss_price = str(entry_price * 0.95)    # 5% loss
+    else:  # short
+        take_profit_price = str(entry_price * 0.95)  # 5% profit
+        stop_loss_price = str(entry_price * 1.05)    # 5% loss
+
+    params = {
+        "market": symbol,
+        "market_type": "FUTURES",
+        "take_profit_type": "mark_price",
+        "take_profit_price": take_profit_price,
+        "stop_loss_type": "mark_price",
+        "stop_loss_price": stop_loss_price
+    }
+
+    # Generate signature (simplified, adjust based on CoinEx's exact requirements)
+    signature = generate_signature(params, COINEX_API_SECRET)
+    params['signature'] = signature
+
+    try:
+        # Set take-profit
+        tp_response = requests.post(TAKE_PROFIT_URL, headers=headers, json=params)
+        tp_response.raise_for_status()
+        print(f"Take-profit set for {symbol}: {tp_response.json()}")
+
+        # Set stop-loss
+        sl_response = requests.post(STOP_LOSS_URL, headers=headers, json=params)
+        sl_response.raise_for_status()
+        print(f"Stop-loss set for {symbol}: {sl_response.json()}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error setting take-profit/stop-loss for {symbol}: {e}")
 
 # Function to set trading parameters
 def set_trading_parameters(symbol):
@@ -109,6 +160,8 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
             order = exchange.create_market_buy_order(symbol, amount=quantity)
             print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+            latest_price = float(exchange.fetch_ticker(symbol)['close'])
+            set_take_profit_stop_loss(symbol, 'long', latest_price)
             return order['id']
         except Exception as e:
             attempt += 1
@@ -129,6 +182,8 @@ def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
             order = exchange.create_market_sell_order(symbol, amount=quantity)
             print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
             print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+            latest_price = float(exchange.fetch_ticker(symbol)['close'])
+            set_take_profit_stop_loss(symbol, 'short', latest_price)
             return order['id']
         except Exception as e:
             attempt += 1
@@ -208,7 +263,6 @@ def ema_strategy():
                            (current_signal == 'short' and position_side == 'long'):
                             trades_placed += 1
                             if position_side == 'short':
-                                # Close short position with a buy order
                                 close_order_id = place_market_buy_order(symbol, position_size, trades_placed)
                                 if close_order_id:
                                     print(f"Closed short position for {symbol} with order {close_order_id}")
@@ -216,14 +270,12 @@ def ema_strategy():
                                     print(f"Failed to close short position for {symbol}. Skipping new order.")
                                     continue
                             elif position_side == 'long':
-                                # Close long position with a sell order
                                 close_order_id = place_market_sell_order(symbol, position_size, trades_placed)
                                 if close_order_id:
                                     print(f"Closed long position for {symbol} with order {close_order_id}")
                                 else:
                                     print(f"Failed to close long position for {symbol}. Skipping new order.")
                                     continue
-                            # Cancel any open order after closing position
                             if open_orders.get(symbol):
                                 cancel_open_order(symbol, open_orders[symbol])
                             open_orders[symbol] = None
