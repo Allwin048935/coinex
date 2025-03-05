@@ -64,8 +64,7 @@ def generate_signature(params, secret):
 # Function to set take-profit and stop-loss with debugging
 def set_take_profit_stop_loss(symbol, side, entry_price):
     headers = {
-        "Authorization": COINEX_API_KEY,
-        "AccessId": COINEX_API_KEY,  # Added AccessId header
+        "X-COINEX-KEY": COINEX_API_KEY,  # Updated to use X-COINEX-KEY
         "Content-Type": "application/json"
     }
     
