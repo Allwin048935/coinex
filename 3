@@ -14,8 +14,8 @@ trading_params = {
 }
 
 # API endpoints
-TAKE_PROFIT_URL = "https://api.coinex.com/perpetual/v1/position/take_profit"
-STOP_LOSS_URL = "https://api.coinex.com/perpetual/v1/position/stop_loss"
+TAKE_PROFIT_URL = "https://api.coinex.com/futures/set-position-take-profit"
+STOP_LOSS_URL = "https://api.coinex.com/futures/set-position-stop-loss"
 
 # Fetch symbols dynamically from CoinEx API
 def fetch_coinex_symbols():
@@ -55,49 +55,65 @@ last_order_types = {symbol: None for symbol in symbols}
 open_orders = {symbol: None for symbol in symbols}
 last_signals = {symbol: None for symbol in symbols}
 
-# Function to generate signature (adjust as per CoinEx API documentation)
+# Function to generate signature for CoinEx API
 def generate_signature(params, secret):
+    # Add timestamp as required by CoinEx authentication
+    params['tonce'] = int(time.time() * 1000)  # Milliseconds
     query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-    return hmac.new(secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    query_string += f"&secret_key={secret}"
+    return hmac.new(secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest().lower()
 
 # Function to set take-profit and stop-loss
 def set_take_profit_stop_loss(symbol, side, entry_price):
     headers = {
         "Authorization": COINEX_API_KEY,
-        "AccessId": COINEX_API_KEY  # Adjust if AccessId is different from API key
+        "Content-Type": "application/json"
     }
     
     # Define take-profit and stop-loss prices (example logic, adjust as needed)
     if side == 'long':
-        take_profit_price = str(entry_price * 1.05)  # 5% profit
-        stop_loss_price = str(entry_price * 0.95)    # 5% loss
+        take_profit_price = str(round(entry_price * 1.05, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 0.95, 6))     # 5% loss
     else:  # short
-        take_profit_price = str(entry_price * 0.95)  # 5% profit
-        stop_loss_price = str(entry_price * 1.05)    # 5% loss
+        take_profit_price = str(round(entry_price * 0.95, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 1.05, 6))    # 5% loss
 
-    params = {
+    # Take-profit parameters
+    tp_params = {
         "market": symbol,
         "market_type": "FUTURES",
         "take_profit_type": "mark_price",
-        "take_profit_price": take_profit_price,
+        "take_profit_price": take_profit_price
+    }
+    tp_params['signature'] = generate_signature(tp_params, COINEX_API_SECRET)
+
+    # Stop-loss parameters
+    sl_params = {
+        "market": symbol,
+        "market_type": "FUTURES",
         "stop_loss_type": "mark_price",
         "stop_loss_price": stop_loss_price
     }
-
-    # Generate signature (simplified, adjust based on CoinEx's exact requirements)
-    signature = generate_signature(params, COINEX_API_SECRET)
-    params['signature'] = signature
+    sl_params['signature'] = generate_signature(sl_params, COINEX_API_SECRET)
 
     try:
         # Set take-profit
-        tp_response = requests.post(TAKE_PROFIT_URL, headers=headers, json=params)
+        tp_response = requests.post(TAKE_PROFIT_URL, headers=headers, json=tp_params)
         tp_response.raise_for_status()
-        print(f"Take-profit set for {symbol}: {tp_response.json()}")
+        tp_data = tp_response.json()
+        if tp_data['code'] == 0:
+            print(f"Take-profit set for {symbol}: {take_profit_price}")
+        else:
+            print(f"Failed to set take-profit for {symbol}: {tp_data['message']}")
 
         # Set stop-loss
-        sl_response = requests.post(STOP_LOSS_URL, headers=headers, json=params)
+        sl_response = requests.post(STOP_LOSS_URL, headers=headers, json=sl_params)
         sl_response.raise_for_status()
-        print(f"Stop-loss set for {symbol}: {sl_response.json()}")
+        sl_data = sl_response.json()
+        if sl_data['code'] == 0:
+            print(f"Stop-loss set for {symbol}: {stop_loss_price}")
+        else:
+            print(f"Failed to set stop-loss for {symbol}: {sl_data['message']}")
     except requests.exceptions.RequestException as e:
         print(f"Error setting take-profit/stop-loss for {symbol}: {e}")
 
