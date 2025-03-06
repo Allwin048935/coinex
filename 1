@@ -76,7 +76,7 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     tp_params = {
         "market": symbol,
         "market_type": "FUTURES",
-        "take_profit_type": "last_price",
+        "take_profit_type": "mark_price",
         "take_profit_price": take_profit_price
     }
     tp_body = json.dumps(tp_params, separators=(',', ':'))
@@ -92,7 +92,7 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     sl_params = {
         "market": symbol,
         "market_type": "FUTURES",
-        "stop_loss_type": "last_price",
+        "stop_loss_type": "mark_price",
         "stop_loss_price": stop_loss_price
     }
     sl_body = json.dumps(sl_params, separators=(',', ':'))
