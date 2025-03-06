@@ -272,8 +272,8 @@ async def macd_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # MACD Histogram conditions
-                current_hist = historical_data['histogram'].iloc[-2]
-                prev_hist = historical_data['histogram'].iloc[-3]
+                current_hist = historical_data['histogram'].iloc[-1]
+                prev_hist = historical_data['histogram'].iloc[-2]
                 
                 if pd.isna(current_hist) or pd.isna(prev_hist):
                     print(f"Invalid histogram values for {symbol}. Skipping...")
@@ -334,7 +334,7 @@ async def macd_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(900)  # 30 minutes
+            await asyncio.sleep(1800)  # 30 minutes
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
