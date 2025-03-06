@@ -14,9 +14,9 @@ trading_params = {
     "leverage": 3
 }
 
-# API endpoints
-TAKE_PROFIT_URL = "https://api.coinex.com/futures/set-position-take-profit"
-STOP_LOSS_URL = "https://api.coinex.com/futures/set-position-stop-loss"
+# API endpoints (updated with /v1/ prefix)
+TAKE_PROFIT_URL = "https://api.coinex.com/v1/futures/set-position-take-profit"
+STOP_LOSS_URL = "https://api.coinex.com/v1/futures/set-position-stop-loss"
 
 # Fetch symbols dynamically from CoinEx API
 def fetch_coinex_symbols():
@@ -83,7 +83,7 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
         "take_profit_price": take_profit_price
     }
     tp_body = json.dumps(tp_params, separators=(',', ':'))  # Compact JSON string
-    tp_path = "/futures/set-position-take-profit"
+    tp_path = "/v1/futures/set-position-take-profit"  # Updated path
     tp_signature = generate_signature("POST", tp_path, tp_body, timestamp, COINEX_API_SECRET)
     tp_headers = {
         "X-COINEX-KEY": COINEX_API_KEY,
@@ -100,7 +100,7 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
         "stop_loss_price": stop_loss_price
     }
     sl_body = json.dumps(sl_params, separators=(',', ':'))  # Compact JSON string
-    sl_path = "/futures/set-position-stop-loss"
+    sl_path = "/v1/futures/set-position-stop-loss"  # Updated path
     sl_signature = generate_signature("POST", sl_path, sl_body, timestamp, COINEX_API_SECRET)
     sl_headers = {
         "X-COINEX-KEY": COINEX_API_KEY,
