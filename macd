@@ -69,10 +69,10 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.50, 6))
+        take_profit_price = str(round(entry_price * 1.05, 6))
         stop_loss_price = str(round(entry_price * 0.98, 6))
     else:  # short
-        take_profit_price = str(round(entry_price * 0.50, 6))
+        take_profit_price = str(round(entry_price * 0.95, 6))
         stop_loss_price = str(round(entry_price * 1.02, 6))
 
     tp_params = {
