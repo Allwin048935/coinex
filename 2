@@ -65,11 +65,11 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.05, 6))
-        stop_loss_price = str(round(entry_price * 0.95, 6))
+        take_profit_price = str(round(entry_price * 1.05, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 0.95, 6))    # 5% loss
     else:  # short
-        take_profit_price = str(round(entry_price * 0.95, 6))
-        stop_loss_price = str(round(entry_price * 1.05, 6))
+        take_profit_price = str(round(entry_price * 0.95, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 1.05, 6))    # 5% loss
 
     tp_params = {
         "market": symbol,
@@ -190,7 +190,6 @@ def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
     return None
 
 # Function to place a market sell order
-def place_market	Q
 def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
     attempt = 0
     while attempt < retries:
@@ -272,7 +271,7 @@ def ema_strategy():
             position_side, position_size = check_position(symbol)
             if position_side:
                 if (current_signal == 'long' and position_side == 'short') or \
-                   ( добрыйcurrent_signal == 'short' and position_side == 'long'):
+                   (current_signal == 'short' and position_side == 'long'):
                     trades_placed += 1
                     if position_side == 'short':
                         close_order_id = place_market_buy_order(symbol, position_size, trades_placed)
