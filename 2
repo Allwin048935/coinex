@@ -4,6 +4,7 @@ import requests
 import time
 import hmac
 import hashlib
+import json
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
@@ -13,7 +14,7 @@ trading_params = {
     "leverage": 3
 }
 
-# API endpoints (corrected based on latest info)
+# API endpoints
 TAKE_PROFIT_URL = "https://api.coinex.com/futures/set-position-take-profit"
 STOP_LOSS_URL = "https://api.coinex.com/futures/set-position-stop-loss"
 
@@ -56,18 +57,15 @@ open_orders = {symbol: None for symbol in symbols}
 last_signals = {symbol: None for symbol in symbols}
 
 # Function to generate signature for CoinEx API
-def generate_signature(params, secret):
-    # Sort parameters and create query string
-    query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-    # Append secret_key for signature calculation (not sent in request)
-    sign_string = f"{query_string}&secret_key={secret}"
-    # Compute SHA256 hash and convert to lowercase hex
-    return hmac.new(secret.encode('utf-8'), sign_string.encode('utf-8'), hashlib.sha256).hexdigest().lower()
+def generate_signature(method, path, body, timestamp, secret):
+    # Create the string to sign: method + request_path + body + timestamp
+    prepared_str = f"{method}{path}{body}{timestamp}"
+    # Compute HMAC-SHA256 signature
+    return hmac.new(bytes(secret, 'latin-1'), bytes(prepared_str, 'latin-1'), hashlib.sha256).hexdigest().lower()
 
 # Function to set take-profit and stop-loss with debugging
 def set_take_profit_stop_loss(symbol, side, entry_price):
-    # Headers with AccessId and Authorization (signature)
-    timestamp = int(time.time() * 1000)  # Milliseconds timestamp
+    timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
     
     # Define take-profit and stop-loss prices
     if side == 'long':
@@ -82,13 +80,15 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
         "market": symbol,
         "market_type": "FUTURES",
         "take_profit_type": "mark_price",
-        "take_profit_price": take_profit_price,
-        "timestamp": str(timestamp)
+        "take_profit_price": take_profit_price
     }
-    tp_signature = generate_signature(tp_params, COINEX_API_SECRET)
+    tp_body = json.dumps(tp_params, separators=(',', ':'))  # Compact JSON string
+    tp_path = "/futures/set-position-take-profit"
+    tp_signature = generate_signature("POST", tp_path, tp_body, timestamp, COINEX_API_SECRET)
     tp_headers = {
-        "Authorization": tp_signature,
-        "AccessId": COINEX_API_KEY,
+        "X-COINEX-KEY": COINEX_API_KEY,
+        "X-COINEX-SIGN": tp_signature,
+        "X-COINEX-TIMESTAMP": timestamp,
         "Content-Type": "application/json"
     }
 
@@ -97,19 +97,21 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
         "market": symbol,
         "market_type": "FUTURES",
         "stop_loss_type": "mark_price",
-        "stop_loss_price": stop_loss_price,
-        "timestamp": str(timestamp)
+        "stop_loss_price": stop_loss_price
     }
-    sl_signature = generate_signature(sl_params, COINEX_API_SECRET)
+    sl_body = json.dumps(sl_params, separators=(',', ':'))  # Compact JSON string
+    sl_path = "/futures/set-position-stop-loss"
+    sl_signature = generate_signature("POST", sl_path, sl_body, timestamp, COINEX_API_SECRET)
     sl_headers = {
-        "Authorization": sl_signature,
-        "AccessId": COINEX_API_KEY,
+        "X-COINEX-KEY": COINEX_API_KEY,
+        "X-COINEX-SIGN": sl_signature,
+        "X-COINEX-TIMESTAMP": timestamp,
         "Content-Type": "application/json"
     }
 
     try:
-        print(f"Setting take-profit for {symbol}: URL={TAKE_PROFIT_URL}, Params={tp_params}, Headers={tp_headers}")
-        tp_response = requests.post(TAKE_PROFIT_URL, headers=tp_headers, json=tp_params)
+        print(f"Setting take-profit for {symbol}: URL={TAKE_PROFIT_URL}, Params={tp_params}, Body={tp_body}, Headers={tp_headers}")
+        tp_response = requests.post(TAKE_PROFIT_URL, headers=tp_headers, data=tp_body)
         tp_response.raise_for_status()
         tp_data = tp_response.json()
         print(f"Take-profit response: {tp_data}")
@@ -118,8 +120,8 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
         else:
             print(f"Failed to set take-profit for {symbol}: {tp_data.get('message')}")
 
-        print(f"Setting stop-loss for {symbol}: URL={STOP_LOSS_URL}, Params={sl_params}, Headers={sl_headers}")
-        sl_response = requests.post(STOP_LOSS_URL, headers=sl_headers, json=sl_params)
+        print(f"Setting stop-loss for {symbol}: URL={STOP_LOSS_URL}, Params={sl_params}, Body={sl_body}, Headers={sl_headers}")
+        sl_response = requests.post(STOP_LOSS_URL, headers=sl_headers, data=sl_body)
         sl_response.raise_for_status()
         sl_data = sl_response.json()
         print(f"Stop-loss response: {sl_data}")
