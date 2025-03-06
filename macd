@@ -6,14 +6,14 @@ import hmac
 import hashlib
 import json
 import asyncio
-import talib
+import ta # Replace talib with ta
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
 trading_params = {
-    "market_type": "FUTURES",
-    "margin_mode": "isolated",
-    "leverage": 3
+ "market_type": "FUTURES",
+ "margin_mode": "isolated",
+ "leverage": 3
 }
 
 # API endpoints
@@ -22,27 +22,27 @@ STOP_LOSS_URL = "https://api.coinex.com/v2/futures/set-position-stop-loss"
 
 # Fetch symbols dynamically from CoinEx API
 def fetch_coinex_symbols():
-    url = "https://api.coinex.com/v2/futures/market"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        symbols_info = {
-            s['market']: float(s['min_amount']) 
-            for s in data['data'] 
-            if s['quote_ccy'] == 'USDT' and s['is_market_available']
-        }
-        return symbols_info
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching symbols from CoinEx: {e}")
-        return {}
+ url = "https://api.coinex.com/v2/futures/market"
+ try:
+ response = requests.get(url)
+ response.raise_for_status()
+ data = response.json()
+ symbols_info = {
+ s['market']: float(s['min_amount']) 
+ for s in data['data'] 
+ if s['quote_ccy'] == 'USDT' and s['is_market_available']
+ }
+ return symbols_info
+ except requests.exceptions.RequestException as e:
+ print(f"Error fetching symbols from CoinEx: {e}")
+ return {}
 
 # Create a CoinEx client
 exchange = ccxt.coinex({
-    'apiKey': COINEX_API_KEY,
-    'secret': COINEX_API_SECRET,
-    'options': {'defaultType': 'swap'},
-    'enableRateLimit': True
+ 'apiKey': COINEX_API_KEY,
+ 'secret': COINEX_API_SECRET,
+ 'options': {'defaultType': 'swap'},
+ 'enableRateLimit': True
 })
 
 # MACD parameters
@@ -61,291 +61,291 @@ last_signals = {symbol: None for symbol in symbols}
 
 # Function to generate signature for CoinEx API
 def generate_signature(method, path, body, timestamp, secret):
-    prepared_str = f"{method}{path}{body}{timestamp}"
-    return hmac.new(bytes(secret, 'latin-1'), bytes(prepared_str, 'latin-1'), hashlib.sha256).hexdigest().lower()
+ prepared_str = f"{method}{path}{body}{timestamp}"
+ return hmac.new(bytes(secret, 'latin-1'), bytes(prepared_str, 'latin-1'), hashlib.sha256).hexdigest().lower()
 
 # Function to set take-profit and stop-loss
 def set_take_profit_stop_loss(symbol, side, entry_price):
-    timestamp = str(int(time.time() * 1000))
-    
-    if side == 'long':
-        take_profit_price = str(round(entry_price * 1.05, 6))
-        stop_loss_price = str(round(entry_price * 0.98, 6))
-    else:  # short
-        take_profit_price = str(round(entry_price * 0.95, 6))
-        stop_loss_price = str(round(entry_price * 1.02, 6))
+ timestamp = str(int(time.time() * 1000))
+ 
+ if side == 'long':
+ take_profit_price = str(round(entry_price * 1.05, 6))
+ stop_loss_price = str(round(entry_price * 0.98, 6))
+ else: # short
+ take_profit_price = str(round(entry_price * 0.95, 6))
+ stop_loss_price = str(round(entry_price * 1.02, 6))
 
-    tp_params = {
-        "market": symbol,
-        "market_type": "FUTURES",
-        "take_profit_type": "mark_price",
-        "take_profit_price": take_profit_price
-    }
-    tp_body = json.dumps(tp_params, separators=(',', ':'))
-    tp_path = "/v2/futures/set-position-take-profit"
-    tp_signature = generate_signature("POST", tp_path, tp_body, timestamp, COINEX_API_SECRET)
-    tp_headers = {
-        "X-COINEX-KEY": COINEX_API_KEY,
-        "X-COINEX-SIGN": tp_signature,
-        "X-COINEX-TIMESTAMP": timestamp,
-        "Content-Type": "application/json"
-    }
+ tp_params = {
+ "market": symbol,
+ "market_type": "FUTURES",
+ "take_profit_type": "mark_price",
+ "take_profit_price": take_profit_price
+ }
+ tp_body = json.dumps(tp_params, separators=(',', ':'))
+ tp_path = "/v2/futures/set-position-take-profit"
+ tp_signature = generate_signature("POST", tp_path, tp_body, timestamp, COINEX_API_SECRET)
+ tp_headers = {
+ "X-COINEX-KEY": COINEX_API_KEY,
+ "X-COINEX-SIGN": tp_signature,
+ "X-COINEX-TIMESTAMP": timestamp,
+ "Content-Type": "application/json"
+ }
 
-    sl_params = {
-        "market": symbol,
-        "market_type": "FUTURES",
-        "stop_loss_type": "mark_price",
-        "stop_loss_price": stop_loss_price
-    }
-    sl_body = json.dumps(sl_params, separators=(',', ':'))
-    sl_path = "/v2/futures/set-position-stop-loss"
-    sl_signature = generate_signature("POST", sl_path, sl_body, timestamp, COINEX_API_SECRET)
-    sl_headers = {
-        "X-COINEX-KEY": COINEX_API_KEY,
-        "X-COINEX-SIGN": sl_signature,
-        "X-COINEX-TIMESTAMP": timestamp,
-        "Content-Type": "application/json"
-    }
+ sl_params = {
+ "market": symbol,
+ "market_type": "FUTURES",
+ "stop_loss_type": "mark_price",
+ "stop_loss_price": stop_loss_price
+ }
+ sl_body = json.dumps(sl_params, separators=(',', ':'))
+ sl_path = "/v2/futures/set-position-stop-loss"
+ sl_signature = generate_signature("POST", sl_path, sl_body, timestamp, COINEX_API_SECRET)
+ sl_headers = {
+ "X-COINEX-KEY": COINEX_API_KEY,
+ "X-COINEX-SIGN": sl_signature,
+ "X-COINEX-TIMESTAMP": timestamp,
+ "Content-Type": "application/json"
+ }
 
-    try:
-        tp_response = requests.post(TAKE_PROFIT_URL, headers=tp_headers, data=tp_body)
-        tp_response.raise_for_status()
-        tp_data = tp_response.json()
-        if tp_data.get('code') == 0:
-            print(f"Take-profit set for {symbol}: {take_profit_price}")
-        else:
-            print(f"Failed to set take-profit for {symbol}: {tp_data.get('message')}")
+ try:
+ tp_response = requests.post(TAKE_PROFIT_URL, headers=tp_headers, data=tp_body)
+ tp_response.raise_for_status()
+ tp_data = tp_response.json()
+ if tp_data.get('code') == 0:
+ print(f"Take-profit set for {symbol}: {take_profit_price}")
+ else:
+ print(f"Failed to set take-profit for {symbol}: {tp_data.get('message')}")
 
-        sl_response = requests.post(STOP_LOSS_URL, headers=sl_headers, data=sl_body)
-        sl_response.raise_for_status()
-        sl_data = sl_response.json()
-        if sl_data.get('code') == 0:
-            print(f"Stop-loss set for {symbol}: {stop_loss_price}")
-        else:
-            print(f"Failed to set stop-loss for {symbol}: {sl_data.get('message')}")
-    except requests.exceptions.RequestException as e:
-        print(f"Error setting take-profit/stop-loss for {symbol}: {e}")
+ sl_response = requests.post(STOP_LOSS_URL, headers=sl_headers, data=sl_body)
+ sl_response.raise_for_status()
+ sl_data = sl_response.json()
+ if sl_data.get('code') == 0:
+ print(f"Stop-loss set for {symbol}: {stop_loss_price}")
+ else:
+ print(f"Failed to set stop-loss for {symbol}: {sl_data.get('message')}")
+ except requests.exceptions.RequestException as e:
+ print(f"Error setting take-profit/stop-loss for {symbol}: {e}")
 
 # Async function to set trading parameters
 async def set_trading_parameters(symbol):
-    try:
-        if not symbol.endswith("USDT"):
-            raise ValueError(f"Invalid symbol format: {symbol}")
-        await exchange.set_leverage(trading_params['leverage'], symbol)
-        await exchange.set_margin_mode(trading_params['margin_mode'], symbol, {'leverage': trading_params['leverage']})
-        print(f"Set parameters for {symbol}: Leverage {trading_params['leverage']}x, {trading_params['margin_mode']} mode")
-        return True
-    except Exception as e:
-        print(f"Error setting trading parameters for {symbol}: {e}")
-        return False
+ try:
+ if not symbol.endswith("USDT"):
+ raise ValueError(f"Invalid symbol format: {symbol}")
+ await exchange.set_leverage(trading_params['leverage'], symbol)
+ await exchange.set_margin_mode(trading_params['margin_mode'], symbol, {'leverage': trading_params['leverage']})
+ print(f"Set parameters for {symbol}: Leverage {trading_params['leverage']}x, {trading_params['margin_mode']} mode")
+ return True
+ except Exception as e:
+ print(f"Error setting trading parameters for {symbol}: {e}")
+ return False
 
-# Async function to fetch historical data and calculate MACD
+# Async function to fetch historical data and calculate MACD using ta library
 async def fetch_ohlcv(symbol, timeframe, limit):
-    try:
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        
-        # Calculate MACD using TA-Lib
-        macd, signal, hist = talib.MACD(
-            df['close'],
-            fastperiod=macd_fast_period,
-            slowperiod=macd_slow_period,
-            signalperiod=macd_signal_period
-        )
-        df['macd'] = macd
-        df['signal'] = signal
-        df['histogram'] = hist
-        
-        return df
-    except Exception as e:
-        print(f"Error fetching OHLCV or calculating MACD for {symbol}: {e}")
-        return None
+ try:
+ ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+ df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+ df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+ df.set_index('timestamp', inplace=True)
+ 
+ # Calculate MACD using ta library
+ macd = ta.trend.MACD(
+ close=df['close'],
+ window_fast=macd_fast_period,
+ window_slow=macd_slow_period,
+ window_sign=macd_signal_period
+ )
+ df['macd'] = macd.macd() # MACD line
+ df['signal'] = macd.macd_signal() # Signal line
+ df['histogram'] = macd.macd_diff() # Histogram (MACD - Signal)
+ 
+ return df
+ except Exception as e:
+ print(f"Error fetching OHLCV or calculating MACD for {symbol}: {e}")
+ return None
 
 # Function to calculate quantity
 def calculate_quantity(symbol, latest_close):
-    min_amount = symbols_info.get(symbol, 0.0001)
-    quantity = min_amount * 1.01
-    return quantity
+ min_amount = symbols_info.get(symbol, 0.0001)
+ quantity = min_amount * 1.01
+ return quantity
 
 # Async function to check current position
 async def check_position(symbol):
-    try:
-        positions = await exchange.fetch_positions([symbol])
-        for pos in positions:
-            if pos['symbol'] == symbol and float(pos['contracts']) > 0:
-                return pos['side'].lower(), float(pos['contracts'])
-        return None, 0
-    except Exception as e:
-        print(f"Error checking position for {symbol}: {e}")
-        return None, 0
+ try:
+ positions = await exchange.fetch_positions([symbol])
+ for pos in positions:
+ if pos['symbol'] == symbol and float(pos['contracts']) > 0:
+ return pos['side'].lower(), float(pos['contracts'])
+ return None, 0
+ except Exception as e:
+ print(f"Error checking position for {symbol}: {e}")
+ return None, 0
 
 # Async function to place a market buy order
 async def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
-    attempt = 0
-    while attempt < retries:
-        try:
-            if not await set_trading_parameters(symbol):
-                raise Exception("Failed to set trading parameters")
-            order = await exchange.create_market_buy_order(symbol, amount=quantity)
-            print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
-            print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
-            latest_price = float((await exchange.fetch_ticker(symbol))['close'])
-            set_take_profit_stop_loss(symbol, 'long', latest_price)
-            return order['id']
-        except Exception as e:
-            attempt += 1
-            print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
-            if attempt < retries:
-                await asyncio.sleep(delay)
-    print(f"Order #{order_num} - Failed to place Market Buy Order for {symbol} after {retries} attempts.")
-    return None
+ attempt = 0
+ while attempt < retries:
+ try:
+ if not await set_trading_parameters(symbol):
+ raise Exception("Failed to set trading parameters")
+ order = await exchange.create_market_buy_order(symbol, amount=quantity)
+ print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}")
+ print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+ latest_price = float((await exchange.fetch_ticker(symbol))['close'])
+ set_take_profit_stop_loss(symbol, 'long', latest_price)
+ return order['id']
+ except Exception as e:
+ attempt += 1
+ print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+ if attempt < retries:
+ await asyncio.sleep(delay)
+ print(f"Order #{order_num} - Failed to place Market Buy Order for {symbol} after {retries} attempts.")
+ return None
 
 # Async function to place a market sell order
 async def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
-    attempt = 0
-    while attempt < retries:
-        try:
-            if not await set_trading_parameters(symbol):
-                raise Exception("Failed to set trading parameters")
-            order = await exchange.create_market_sell_order(symbol, amount=quantity)
-            print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
-            print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
-            latest_price = float((await exchange.fetch_ticker(symbol))['close'])
-            set_take_profit_stop_loss(symbol, 'short', latest_price)
-            return order['id']
-        except Exception as e:
-            attempt += 1
-            print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
-            if attempt < retries:
-                await asyncio.sleep(delay)
-    print(f"Order #{order_num} - Failed to place Market Sell Order for {symbol} after {retries} attempts.")
-    return None
+ attempt = 0
+ while attempt < retries:
+ try:
+ if not await set_trading_parameters(symbol):
+ raise Exception("Failed to set trading parameters")
+ order = await exchange.create_market_sell_order(symbol, amount=quantity)
+ print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}")
+ print(f"Quantity: {quantity}, Leverage: {trading_params['leverage']}x, Margin Mode: {trading_params['margin_mode']}")
+ latest_price = float((await exchange.fetch_ticker(symbol))['close'])
+ set_take_profit_stop_loss(symbol, 'short', latest_price)
+ return order['id']
+ except Exception as e:
+ attempt += 1
+ print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+ if attempt < retries:
+ await asyncio.sleep(delay)
+ print(f"Order #{order_num} - Failed to place Market Sell Order for {symbol} after {retries} attempts.")
+ return None
 
 # Async function to cancel an open order
 async def cancel_open_order(symbol, order_id):
-    try:
-        if order_id:
-            await exchange.cancel_order(order_id, symbol)
-            print(f"Cancelled open order for {symbol}: {order_id}")
-    except Exception as e:
-        print(f"Error cancelling order for {symbol}: {e}")
+ try:
+ if order_id:
+ await exchange.cancel_order(order_id, symbol)
+ print(f"Cancelled open order for {symbol}: {order_id}")
+ except Exception as e:
+ print(f"Error cancelling order for {symbol}: {e}")
 
 # Main async trading function with MACD Histogram strategy
 async def macd_strategy():
-    global symbols, symbols_info, last_order_types, open_orders, last_signals
-    
-    while True:
-        try:
-            # Refresh symbols list
-            symbols_info = fetch_coinex_symbols()
-            symbols = list(symbols_info.keys())
-            
-            # Update tracking dictionaries
-            last_order_types = {symbol: last_order_types.get(symbol) for symbol in symbols}
-            open_orders = {symbol: open_orders.get(symbol) for symbol in symbols}
-            last_signals = {symbol: last_signals.get(symbol) for symbol in symbols}
-            
-            trades_placed = 0
+ global symbols, symbols_info, last_order_types, open_orders, last_signals
+ 
+ while True:
+ try:
+ # Refresh symbols list
+ symbols_info = fetch_coinex_symbols()
+ symbols = list(symbols_info.keys())
+ 
+ # Update tracking dictionaries
+ last_order_types = {symbol: last_order_types.get(symbol) for symbol in symbols}
+ open_orders = {symbol: open_orders.get(symbol) for symbol in symbols}
+ last_signals = {symbol: last_signals.get(symbol) for symbol in symbols}
+ 
+ trades_placed = 0
 
-            for i, symbol in enumerate(symbols, 1):
-                symbol = symbol.upper()
-                print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
-                
-                historical_data = await fetch_ohlcv(symbol, time_interval, 100)
-                if historical_data is None or len(historical_data) < macd_slow_period + macd_signal_period:
-                    print(f"Not enough data for {symbol}. Skipping...")
-                    continue
+ for i, symbol in enumerate(symbols, 1):
+ symbol = symbol.upper()
+ print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
+ 
+ historical_data = await fetch_ohlcv(symbol, time_interval, 100)
+ if historical_data is None or len(historical_data) < macd_slow_period + macd_signal_period:
+ print(f"Not enough data for {symbol}. Skipping...")
+ continue
 
-                latest_candle = await exchange.fetch_ticker(symbol)
-                if 'close' not in latest_candle:
-                    print(f"Error: 'close' not found in latest_candle for {symbol}")
-                    continue
-                
-                latest_close = float(latest_candle['close'])
-                if latest_close is None:
-                    print(f"Error: latest_close is None for {symbol}")
-                    continue
+ latest_candle = await exchange.fetch_ticker(symbol)
+ if 'close' not in latest_candle:
+ print(f"Error: 'close' not found in latest_candle for {symbol}")
+ continue
+ 
+ latest_close = float(latest_candle['close'])
+ if latest_close is None:
+ print(f"Error: latest_close is None for {symbol}")
+ continue
 
-                quantity = calculate_quantity(symbol, latest_close)
-                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
+ quantity = calculate_quantity(symbol, latest_close)
+ print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
-                # MACD Histogram conditions
-                current_hist = historical_data['histogram'].iloc[-1]
-                prev_hist = historical_data['histogram'].iloc[-2]
-                
-                if pd.isna(current_hist) or pd.isna(prev_hist):
-                    print(f"Invalid histogram values for {symbol}. Skipping...")
-                    continue
+ # MACD Histogram conditions
+ current_hist = historical_data['histogram'].iloc[-1]
+ prev_hist = historical_data['histogram'].iloc[-2]
+ 
+ if pd.isna(current_hist) or pd.isna(prev_hist):
+ print(f"Invalid histogram values for {symbol}. Skipping...")
+ continue
 
-                if current_hist > prev_hist:
-                    current_signal = 'long'
-                    print(f'{symbol} Potential Buy Signal (Histogram increasing)')
-                elif current_hist < prev_hist:
-                    current_signal = 'short'
-                    print(f'{symbol} Potential Sell Signal (Histogram decreasing)')
-                else:
-                    current_signal = None
-                    print(f'{symbol} No clear signal (Histogram unchanged)')
-                    continue
+ if current_hist > prev_hist:
+ current_signal = 'long'
+ print(f'{symbol} Potential Buy Signal (Histogram increasing)')
+ elif current _hist < prev_hist:
+ current_signal = 'short'
+ print(f'{symbol} Potential Sell Signal (Histogram decreasing)')
+ else:
+ current_signal = None
+ print(f'{symbol} No clear signal (Histogram unchanged)')
+ continue
 
-                # Handle existing orders and new signals
-                if current_signal and last_signals.get(symbol) != current_signal:
-                    position_side, position_size = await check_position(symbol)
-                    if position_side:
-                        if (current_signal == 'long' and position_side == 'short') or \
-                           (current_signal == 'short' and position_side == 'long'):
-                            trades_placed += 1
-                            if position_side == 'short':
-                                close_order_id = await place_market_buy_order(symbol, position_size, trades_placed)
-                                if close_order_id:
-                                    print(f"Closed short position for {symbol} with order {close_order_id}")
-                                else:
-                                    continue
-                            elif position_side == 'long':
-                                close_order_id = await place_market_sell_order(symbol, position_size, trades_placed)
-                                if close_order_id:
-                                    print(f"Closed long position for {symbol} with order {close_order_id}")
-                                else:
-                                    continue
-                            if open_orders.get(symbol):
-                                await cancel_open_order(symbol, open_orders[symbol])
-                            open_orders[symbol] = None
-                            last_order_types[symbol] = None
+ # Handle existing orders and new signals
+ if current_signal and last_signals.get(symbol) != current_signal:
+ position_side, position_size = await check_position(symbol)
+ if position_side:
+ if (current_signal == 'long' and position_side == 'short') or \
+ (current_signal == 'short' and position_side == 'long'):
+ trades_placed += 1
+ if position_side == 'short':
+ close_order_id = await place_market_buy_order(symbol, position_size, trades_placed)
+ if close_order_id:
+ print(f"Closed short position for {symbol} with order {close_order_id}")
+ else:
+ continue
+ elif position_side == 'long':
+ close_order_id = await place_market_sell_order(symbol, position_size, trades_placed)
+ if close_order_id:
+ print(f"Closed long position for {symbol} with order {close_order_id}")
+ else:
+ continue
+ if open_orders.get(symbol):
+ await cancel_open_order(symbol, open_orders[symbol])
+ open_orders[symbol] = None
+ last_order_types[symbol] = None
 
-                    # Update signal and place new order
-                    last_signals[symbol] = current_signal
-                    
-                    if current_signal == 'long':
-                        trades_placed += 1
-                        order_id = await place_market_buy_order(symbol, quantity, trades_placed)
-                        if order_id:
-                            open_orders[symbol] = order_id
-                            last_order_types[symbol] = 'BUY'
-                    elif current_signal == 'short':
-                        trades_placed += 1
-                        order_id = await place_market_sell_order(symbol, quantity, trades_placed)
-                        if order_id:
-                            open_orders[symbol] = order_id
-                            last_order_types[symbol] = 'SELL'
-                else:
-                    print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
+ # Update signal and place new order
+ last_signals[symbol] = current_signal
+ 
+ if current_signal == 'long':
+ trades_placed += 1
+ order_id = await place_market_buy_order(symbol, quantity, trades_placed)
+ if order_id:
+ open_orders[symbol] = order_id
+ last_order_types[symbol] = 'BUY'
+ elif current_signal == 'short':
+ trades_placed += 1
+ order_id = await place_market_sell_order(symbol, quantity, trades_placed)
+ if order_id:
+ open_orders[symbol] = order_id
+ last_order_types[symbol] = 'SELL'
+ else:
+ print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
 
-            print(f"\nCycle completed. Total trades placed: {trades_placed}")
-            print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(1800)  # 30 minutes
-            
-        except Exception as e:
-            print(f'An error occurred in cycle: {e}')
-            await asyncio.sleep(60)  # 1 minute
+ print(f"\nCycle completed. Total trades placed: {trades_placed}")
+ print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
+ await asyncio.sleep(1800) # 30 minutes
+ 
+ except Exception as e:
+ print(f'An error occurred in cycle: {e}')
+ await asyncio.sleep(60) # 1 minute
 
 # Run the trading strategy
 async def main():
-    if symbols:
-        await macd_strategy()
-    else:
-        print("No symbols available to trade. Exiting...")
+ if symbols:
+ await macd_strategy()
+ else:
+ print("No symbols available to trade. Exiting...")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+ asyncio.run(main())
