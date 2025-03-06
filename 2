@@ -316,7 +316,7 @@ symbols = list(symbols_info.keys())
 # Schedule the strategy to run every 30 minutes
 if symbols:
     schedule.every().hour.at(":00").do(ema_strategy)
-    schedule.every().hour.at(":30").do(ema_strategy)
+    schedule.every().hour.at(":40").do(ema_strategy)
     
     print("Trading bot started. Waiting for next scheduled run...")
     while True:
