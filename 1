@@ -67,11 +67,11 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.30, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 0.97, 6))    # 5% loss
+        take_profit_price = str(round(entry_price * 1.01, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 0.98, 6))    # 5% loss
     else:  # short
-        take_profit_price = str(round(entry_price * 0.70, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 1.03, 6))    # 5% loss
+        take_profit_price = str(round(entry_price * 0.99, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 1.02, 6))    # 5% loss
 
     tp_params = {
         "market": symbol,
@@ -184,7 +184,7 @@ async def check_position(symbol):
         return None, 0
 
 # Async function to place a market buy order with retry logic
-async def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
+async def place_market_buy_order(symbol, quantity, order_num, retries=2, delay=1):
     attempt = 0
     while attempt < retries:
         try:
@@ -340,7 +340,7 @@ async def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(1800)  # 30 minutes
+            await asyncio.sleep(900)  # 30 minutes
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
