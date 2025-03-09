@@ -276,8 +276,8 @@ async def ema_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # Check MACD histogram conditions
-                current_histogram = historical_data['histogram'].iloc[-2]
-                prev_histogram = historical_data['histogram'].iloc[-3]
+                current_histogram = historical_data['macd'].iloc[-2]
+                prev_histogram = historical_data['macd'].iloc[-3]
                 
                 if current_histogram > prev_histogram:
                     current_signal = 'long'
