@@ -46,7 +46,7 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA period for MACD calculation
-macd_ema_period = 1
+macd_ema_period = 3
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -67,11 +67,11 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.05, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 0.95, 6))    # 5% loss
+        take_profit_price = str(round(entry_price * 1.01, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 0.98, 6))    # 5% loss
     else:  # short
-        take_profit_price = str(round(entry_price * 0.95, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 1.05, 6))    # 5% loss
+        take_profit_price = str(round(entry_price * 0.99, 6))  # 5% profit
+        stop_loss_price = str(round(entry_price * 1.02, 6))    # 5% loss
 
     tp_params = {
         "market": symbol,
@@ -276,8 +276,8 @@ async def ema_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # Check MACD histogram conditions
-                current_histogram = historical_data['histogram'].iloc[-1]
-                prev_histogram = historical_data['histogram'].iloc[-2]
+                current_histogram = historical_data['histogram'].iloc[-2]
+                prev_histogram = historical_data['histogram'].iloc[-3]
                 
                 if current_histogram > prev_histogram:
                     current_signal = 'long'
@@ -340,7 +340,7 @@ async def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(1800)  # 30 minutes
+            await asyncio.sleep(900)  # 30 minutes
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
