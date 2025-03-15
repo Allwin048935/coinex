@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import json
 import asyncio
-import ta
+import pandas_ta as ta  # Changed from ta to pandas_ta
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
@@ -46,7 +46,7 @@ exchange = ccxt.coinex({
 })
 
 # Supertrend parameters
-supertrend_period = 10
+supertrend_period = 7    # Changed to 7 as per your suggestion
 supertrend_multiplier = 3
 
 # Get initial symbols and their min_amounts
@@ -139,14 +139,10 @@ async def fetch_ohlcv(symbol, timeframe, limit):
     try:
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        supertrend = ta.trend.SupertrendIndicator(
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            period=supertrend_period,
-            multiplier=supertrend_multiplier
-        )
-        df['supertrend'] = supertrend.supertrend()
+        # Capitalize column names as pandas_ta expects 'High', 'Low', 'Close'
+        df.columns = ['timestamp', 'Open', 'High', 'Low', 'Close', 'volume']
+        sti = ta.supertrend(df['High'], df['Low'], df['Close'], length=supertrend_period, multiplier=supertrend_multiplier)
+        df['supertrend'] = sti[f'SUPERT_{supertrend_period}_{supertrend_multiplier}.0']
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return df
@@ -270,8 +266,8 @@ async def supertrend_strategy():
                 # Check Supertrend conditions
                 current_supertrend = historical_data['supertrend'].iloc[-2]
                 prev_supertrend = historical_data['supertrend'].iloc[-3]
-                current_price = historical_data['close'].iloc[-2]
-                prev_price = historical_data['close'].iloc[-3]
+                current_price = historical_data['Close'].iloc[-2]  # Changed to 'Close'
+                prev_price = historical_data['Close'].iloc[-3]     # Changed to 'Close'
                 
                 # Buy signal: Price crosses above Supertrend
                 if prev_price <= prev_supertrend and current_price > current_supertrend:
