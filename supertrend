@@ -46,8 +46,8 @@ exchange = ccxt.coinex({
 })
 
 # Supertrend parameters
-supertrend_period = 7
-supertrend_multiplier = 3
+supertrend_period = 3
+supertrend_multiplier = 1
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
