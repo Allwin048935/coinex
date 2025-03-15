@@ -51,7 +51,7 @@ rsi_ema_period = 14
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
-symbols Suchexchange = list(symbols_info.keys())
+symbols = list(symbols_info.keys())
 
 # Track last order types, open orders, and last signals
 last_order_types = {symbol: None for symbol in symbols}
@@ -318,7 +318,16 @@ async def rsi_strategy():
                         trades_placed += 1
                         order_id = await place_market_sell_order(symbol, quantity, trades_placed)
                         if order_id:
-                            open_orders[symbolεξ
+                            open_orders[symbol] = order_id
+                            last_order_types[symbol] = 'SELL'
+
+            print(f"\nCycle completed. Total trades placed: {trades_placed}")
+            print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
+            await asyncio.sleep(900)  # 30 minutes
+            
+        except Exception as e:
+            print(f'An error occurred in cycle: {e}')
+            await asyncio.sleep(60)  # 1 minute
 
 # Run the trading strategy
 async def main():
