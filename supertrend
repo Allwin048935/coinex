@@ -46,8 +46,8 @@ exchange = ccxt.coinex({
 })
 
 # Supertrend parameters
-supertrend_period = 3
-supertrend_multiplier = 1
+supertrend_period = 30
+supertrend_multiplier = 2
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -68,11 +68,11 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.01, 6))
-        stop_loss_price = str(round(entry_price * 0.98, 6))
+        take_profit_price = str(round(entry_price * 1.01, 10))
+        stop_loss_price = str(round(entry_price * 0.98, 10))
     else:
-        take_profit_price = str(round(entry_price * 0.99, 6))
-        stop_loss_price = str(round(entry_price * 1.02, 6))
+        take_profit_price = str(round(entry_price * 0.99, 10))
+        stop_loss_price = str(round(entry_price * 1.02, 10))
 
     tp_params = {
         "market": symbol,
@@ -297,8 +297,8 @@ async def supertrend_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Quantity: {quantity}")
 
                 # Check Supertrend conditions
-                current_supertrend = historical_data['supertrend'].iloc[-2]
-                prev_supertrend = historical_data['supertrend'].iloc[-3]
+                current_supertrend = historical_data['supertrend'].iloc[-1]
+                prev_supertrend = historical_data['supertrend'].iloc[-2]
                 current_price = historical_data['close'].iloc[-1]
                 prev_price = historical_data['close'].iloc[-2]
                 
