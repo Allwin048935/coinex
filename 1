@@ -51,7 +51,7 @@ rsi_ema_period = 14
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
-symbols = list(symbols_info.keys())
+symbols Suchexchange = list(symbols_info.keys())
 
 # Track last order types, open orders, and last signals
 last_order_types = {symbol: None for symbol in symbols}
@@ -138,15 +138,15 @@ async def set_trading_parameters(symbol):
 def calculate_ema(df, period, column='rsi'):
     return df[column].ewm(span=period, adjust=False).mean()
 
-# Async function to fetch historical data and calculate RSI with EMA using HL2
+# Async function to fetch historical data and calculate RSI with HLC/3
 async def fetch_ohlcv(symbol, timeframe, limit):
     try:
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        # Calculate HL2
-        df['hl2'] = (df['high'] + df['low']) / 2
-        # Use HL2 for RSI calculation instead of close
-        df['rsi'] = ta.momentum.RSIIndicator(df['hl2'], window=rsi_period).rsi()
+        # Calculate HLC/3
+        df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
+        # Use HLC/3 for RSI calculation
+        df['rsi'] = ta.momentum.RSIIndicator(df['hlc3'], window=rsi_period).rsi()
         df['rsi_ema'] = calculate_ema(df, rsi_ema_period)
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
@@ -269,10 +269,10 @@ async def rsi_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Quantity: {quantity}")
 
                 # Check RSI crossover conditions
-                current_rsi = historical_data['rsi'].iloc[-1]
-                current_rsi_ema = historical_data['rsi_ema'].iloc[-1]
-                prev_rsi = historical_data['rsi'].iloc[-2]
-                prev_rsi_ema = historical_data['rsi_ema'].iloc[-2]
+                current_rsi = historical_data['rsi'].iloc[-2]
+                current_rsi_ema = historical_data['rsi_ema'].iloc[-2]
+                prev_rsi = historical_data['rsi'].iloc[-3]
+                prev_rsi_ema = historical_data['rsi_ema'].iloc[-3]
                 
                 if prev_rsi <= prev_rsi_ema and current_rsi > current_rsi_ema:
                     current_signal = 'long'
@@ -318,16 +318,7 @@ async def rsi_strategy():
                         trades_placed += 1
                         order_id = await place_market_sell_order(symbol, quantity, trades_placed)
                         if order_id:
-                            open_orders[symbol] = order_id
-                            last_order_types[symbol] = 'SELL'
-
-            print(f"\nCycle completed. Total trades placed: {trades_placed}")
-            print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(900)  # 30 minutes
-            
-        except Exception as e:
-            print(f'An error occurred in cycle: {e}')
-            await asyncio.sleep(60)  # 1 minute
+                            open_orders[symbolεξ
 
 # Run the trading strategy
 async def main():
