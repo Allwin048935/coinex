@@ -68,11 +68,11 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.01, 6))  # 1% profit
-        stop_loss_price = str(round(entry_price * 0.98, 6))    # 2% loss
+        take_profit_price = str(round(entry_price * 1.012, 6))  # 1% profit
+        stop_loss_price = str(round(entry_price * 0.982, 6))    # 2% loss
     else:  # short
-        take_profit_price = str(round(entry_price * 0.99, 6))  # 1% profit
-        stop_loss_price = str(round(entry_price * 1.02, 6))    # 2% loss
+        take_profit_price = str(round(entry_price * 0.982, 6))  # 1% profit
+        stop_loss_price = str(round(entry_price * 1.018, 6))    # 2% loss
 
     tp_params = {
         "market": symbol,
@@ -269,10 +269,10 @@ async def rsi_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Quantity: {quantity}")
 
                 # Check RSI crossover conditions
-                current_rsi = historical_data['rsi'].iloc[-2]
-                current_rsi_ema = historical_data['rsi_ema'].iloc[-2]
-                prev_rsi = historical_data['rsi'].iloc[-3]
-                prev_rsi_ema = historical_data['rsi_ema'].iloc[-3]
+                current_rsi = historical_data['rsi'].iloc[-1]
+                current_rsi_ema = historical_data['rsi_ema'].iloc[-1]
+                prev_rsi = historical_data['rsi'].iloc[-2]
+                prev_rsi_ema = historical_data['rsi_ema'].iloc[-2]
                 
                 if prev_rsi <= prev_rsi_ema and current_rsi > current_rsi_ema:
                     current_signal = 'long'
