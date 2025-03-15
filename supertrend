@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import json
 import asyncio
-import pandas_ta as ta  # Changed from ta to pandas_ta
+import numpy as np  # We'll use numpy directly
 from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 
 # Trading parameters for all symbols
@@ -46,7 +46,7 @@ exchange = ccxt.coinex({
 })
 
 # Supertrend parameters
-supertrend_period = 7    # Changed to 7 as per your suggestion
+supertrend_period = 7
 supertrend_multiplier = 3
 
 # Get initial symbols and their min_amounts
@@ -134,15 +134,48 @@ async def set_trading_parameters(symbol):
         print(f"Error setting trading parameters for {symbol}: {e}")
         return False
 
+# Function to calculate Supertrend manually
+def calculate_supertrend(df, period, multiplier):
+    hl2 = (df['high'] + df['low']) / 2
+    atr = pd.Series(index=df.index, dtype='float64')
+    
+    # Calculate True Range
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    
+    # Calculate ATR
+    atr[period-1:] = tr.rolling(window=period).mean()[period-1:]
+    
+    upper_band = hl2 + (multiplier * atr)
+    lower_band = hl2 - (multiplier * atr)
+    
+    supertrend = pd.Series(index=df.index, dtype='float64')
+    direction = pd.Series(index=df.index, dtype='int64')
+    
+    for i in range(period, len(df)):
+        if df['close'].iloc[i-1] > supertrend.iloc[i-1]:
+            supertrend.iloc[i] = lower_band.iloc[i]
+            direction.iloc[i] = 1
+        else:
+            supertrend.iloc[i] = upper_band.iloc[i]
+            direction.iloc[i] = -1
+            
+        # Adjust bands based on previous close
+        if supertrend.iloc[i] > df['close'].iloc[i-1] and df['close'].iloc[i-1] > supertrend.iloc[i-1]:
+            supertrend.iloc[i] = supertrend.iloc[i-1]
+        elif supertrend.iloc[i] < df['close'].iloc[i-1] and df['close'].iloc[i-1] < supertrend.iloc[i-1]:
+            supertrend.iloc[i] = supertrend.iloc[i-1]
+    
+    return supertrend
+
 # Async function to fetch historical data and calculate Supertrend
 async def fetch_ohlcv(symbol, timeframe, limit):
     try:
         ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        # Capitalize column names as pandas_ta expects 'High', 'Low', 'Close'
-        df.columns = ['timestamp', 'Open', 'High', 'Low', 'Close', 'volume']
-        sti = ta.supertrend(df['High'], df['Low'], df['Close'], length=supertrend_period, multiplier=supertrend_multiplier)
-        df['supertrend'] = sti[f'SUPERT_{supertrend_period}_{supertrend_multiplier}.0']
+        df['supertrend'] = calculate_supertrend(df, supertrend_period, supertrend_multiplier)
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return df
@@ -266,8 +299,8 @@ async def supertrend_strategy():
                 # Check Supertrend conditions
                 current_supertrend = historical_data['supertrend'].iloc[-2]
                 prev_supertrend = historical_data['supertrend'].iloc[-3]
-                current_price = historical_data['Close'].iloc[-2]  # Changed to 'Close'
-                prev_price = historical_data['Close'].iloc[-3]     # Changed to 'Close'
+                current_price = historical_data['close'].iloc[-2]
+                prev_price = historical_data['close'].iloc[-3]
                 
                 # Buy signal: Price crosses above Supertrend
                 if prev_price <= prev_supertrend and current_price > current_supertrend:
