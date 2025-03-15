@@ -299,8 +299,8 @@ async def supertrend_strategy():
                 # Check Supertrend conditions
                 current_supertrend = historical_data['supertrend'].iloc[-2]
                 prev_supertrend = historical_data['supertrend'].iloc[-3]
-                current_price = historical_data['close'].iloc[-2]
-                prev_price = historical_data['close'].iloc[-3]
+                current_price = historical_data['close'].iloc[-1]
+                prev_price = historical_data['close'].iloc[-2]
                 
                 # Buy signal: Price crosses above Supertrend
                 if prev_price <= prev_supertrend and current_price > current_supertrend:
