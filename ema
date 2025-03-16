@@ -45,8 +45,8 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 2
-long_ema_period = 26
+short_ema_period = 3
+long_ema_period = 30
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -272,10 +272,10 @@ async def ema_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # Check EMA conditions
-                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
+                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1] and historical_data['short_ema'].iloc[-2] < historical_data['long_ema'].iloc[-2]:
                     current_signal = 'long'
                     print(f'{symbol} Potential Buy Signal (Crossover)')
-                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]:
+                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1] and historical_data['short_ema'].iloc[-2] > historical_data['long_ema'].iloc[-2]:
                     current_signal = 'short'
                     print(f'{symbol} Potential Sell Signal (Crossunder)')
                 else:
