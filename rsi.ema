@@ -68,10 +68,10 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
     
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.01, 6))  # 1% profit
+        take_profit_price = str(round(entry_price * 1.02, 6))  # 1% profit
         stop_loss_price = str(round(entry_price * 0.98, 6))    # 2% loss
     else:  # short
-        take_profit_price = str(round(entry_price * 0.99, 6))  # 1% profit
+        take_profit_price = str(round(entry_price * 0.98, 6))  # 1% profit
         stop_loss_price = str(round(entry_price * 1.02, 6))    # 2% loss
 
     tp_params = {
