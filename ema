@@ -68,10 +68,10 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     
     if side == 'long':
         take_profit_price = str(round(entry_price * 1.30, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 0.97, 6))    # 5% loss
+        stop_loss_price = str(round(entry_price * 0.98, 6))    # 5% loss
     else:  # short
         take_profit_price = str(round(entry_price * 0.70, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 1.03, 6))    # 5% loss
+        stop_loss_price = str(round(entry_price * 1.02, 6))    # 5% loss
 
     tp_params = {
         "market": symbol,
