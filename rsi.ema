@@ -158,8 +158,8 @@ def calculate_quantity(symbol, latest_close):
     base_quantity = min_amount
     value = base_quantity * latest_close
     
-    if value < 6:
-        quantity = 6 / latest_close
+    if value < 30:
+        quantity = 30 / latest_close
         print(f"{symbol}: Adjusted quantity to ${6} value. Min amount value was ${value:.2f}")
     else:
         quantity = base_quantity
