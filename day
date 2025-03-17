@@ -20,7 +20,7 @@ TAKE_PROFIT_URL = "https://api.coinex.com/v2/futures/set-position-take-profit"
 STOP_LOSS_URL = "https://api.coinex.com/v2/futures/set-position-stop-loss"
 
 # Define specific symbols to trade
-symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'ADAUSDT', 'DOGEUSDT', 'XRPUSDT']
 
 # Create a CoinEx client (async version)
 exchange = ccxt.coinex({
@@ -32,7 +32,7 @@ exchange = ccxt.coinex({
 
 # Define EMA strategy parameters
 short_ema_period = 3
-time_interval = '3m'  # Set to 5-minute candles for EMA calculation
+time_interval = '1m'  # Set to 5-minute candles for EMA calculation
 
 # Fetch symbols info for minimum amounts
 def fetch_coinex_symbols():
