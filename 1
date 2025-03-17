@@ -5,16 +5,17 @@ from datetime import datetime
 import ccxt
 import telegram
 from io import BytesIO
+import config  # Import Telegram credentials from config.py
 
-# Trendlines with Breaks class - Fixed version
+# Trendlines with Breaks class - Improved version
 class TrendlinesWithBreaks:
     def __init__(self, length=14, mult=1.0, calc_method='stdev', backpaint=True):
         self.length = length
         self.mult = mult
         self.calc_method = calc_method.lower()
         self.backpaint = backpaint
-        self.upper = np.nan
-        self.lower = np.nan
+        self.upper = pd.Series(np.nan)
+        self.lower = pd.Series(np.nan)
         self.slope_ph = 0.0
         self.slope_pl = 0.0
         self.last_ph = np.nan
@@ -47,16 +48,16 @@ class TrendlinesWithBreaks:
         return pd.Series(np.zeros(len(close)), index=close.index)
 
     def process(self, high, low, close):
-        close = pd.Series(close)
-        high = pd.Series(high)
-        low = pd.Series(low)
+        close = pd.Series(close, index=range(len(close)))
+        high = pd.Series(high, index=range(len(high)))
+        low = pd.Series(low, index=range(len(low)))
         
         # Calculate pivots
         ph = self.pivot_high(high)
         pl = self.pivot_low(low)
         slope = self.calculate_slope(close)
 
-        # Update slopes and trendlines
+        # Initialize trendlines
         upper_line = pd.Series(np.nan, index=close.index)
         lower_line = pd.Series(np.nan, index=close.index)
         upos = pd.Series(0, index=close.index)
@@ -68,18 +69,26 @@ class TrendlinesWithBreaks:
                 self.last_ph = ph.iloc[i]
                 self.last_ph_idx = i
                 self.slope_ph = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_ph
+                # Reset lower trendline if new high pivot
+                if self.last_pl_idx > self.last_ph_idx:
+                    self.last_pl = np.nan
+                    self.last_pl_idx = -1
 
             # Update pivot lows
             if not np.isnan(pl.iloc[i]):
                 self.last_pl = pl.iloc[i]
                 self.last_pl_idx = i
                 self.slope_pl = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_pl
+                # Reset upper trendline if new low pivot
+                if self.last_ph_idx > self.last_pl_idx:
+                    self.last_ph = np.nan
+                    self.last_ph_idx = -1
 
             # Calculate trendlines
-            if self.last_ph_idx >= 0:
+            if self.last_ph_idx >= 0 and i >= self.last_ph_idx:
                 bars_since_ph = i - self.last_ph_idx
                 upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
-            if self.last_pl_idx >= 0:
+            if self.last_pl_idx >= 0 and i >= self.last_pl_idx:
                 bars_since_pl = i - self.last_pl_idx
                 lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
 
@@ -100,14 +109,10 @@ class TrendlinesWithBreaks:
             'down_breaks': down_breaks
         }
 
-# Telegram configuration - REPLACE THESE WITH YOUR OWN VALUES
-TELEGRAM_TOKEN = '8066951467:AAHOaFDL9kixcdwtjbwb-szDgnl8R9Vz8AI'  # Get from BotFather
-CHAT_ID = '1385370555'  # Your Telegram chat ID
-
 async def send_to_telegram(plot_buffer):
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    bot = telegram.Bot(token=config.TELEGRAM_TOKEN)
     async with bot:
-        await bot.send_photo(chat_id=CHAT_ID, photo=plot_buffer)
+        await bot.send_photo(chat_id=config.CHAT_ID, photo=plot_buffer)
 
 def fetch_btcusdt_data():
     exchange = ccxt.binance()
@@ -124,9 +129,13 @@ def create_plot(df, results):
     # Plot price
     plt.plot(df['timestamp'], df['close'], label='BTC/USDT Close', color='blue', alpha=0.7)
     
-    # Plot trendlines
-    plt.plot(df['timestamp'], results['upper'], label='Upper Trendline', color='teal', linestyle='--')
-    plt.plot(df['timestamp'], results['lower'], label='Lower Trendline', color='red', linestyle='--')
+    # Plot trendlines - only where valid
+    valid_upper = results['upper'][results['upper'].notna()]
+    valid_lower = results['lower'][results['lower'].notna()]
+    upper_times = df['timestamp'][results['upper'].notna()]
+    lower_times = df['timestamp'][results['lower'].notna()]
+    plt.plot(upper_times, valid_upper, label='Upper Trendline', color='teal', linestyle='--')
+    plt.plot(lower_times, valid_lower, label='Lower Trendline', color='red', linestyle='--')
     
     # Plot breaks
     up_breaks = df[results['up_breaks']]
@@ -139,14 +148,9 @@ def create_plot(df, results):
     plt.ylabel('Price (USDT)')
     plt.legend(loc='best')
     plt.grid(True, alpha=0.3)
-    
-    # Rotate x-axis labels for better readability
     plt.xticks(rotation=45)
-    
-    # Adjust layout to prevent label cutoff
     plt.tight_layout()
     
-    # Save to buffer
     buffer = BytesIO()
     plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
     buffer.seek(0)
@@ -154,19 +158,9 @@ def create_plot(df, results):
     return buffer
 
 async def main():
-    # Fetch data
     df = fetch_btcusdt_data()
-    
-    # Initialize and process trendlines
-    trendlines = TrendlinesWithBreaks(
-        length=14,
-        mult=1.0,
-        calc_method='stdev',
-        backpaint=True
-    )
+    trendlines = TrendlinesWithBreaks(length=14, mult=1.0, calc_method='stdev', backpaint=True)
     results = trendlines.process(df['high'], df['low'], df['close'])
-    
-    # Create and send plot
     plot_buffer = create_plot(df, results)
     await send_to_telegram(plot_buffer)
     plot_buffer.close()
