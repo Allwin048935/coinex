@@ -7,7 +7,7 @@ import telegram
 from io import BytesIO
 import config  # Import Telegram credentials from config.py
 
-# Trendlines with Breaks class - Improved version
+# Trendlines with Breaks class - Updated to stop at intersections
 class TrendlinesWithBreaks:
     def __init__(self, length=14, mult=1.0, calc_method='stdev', backpaint=True):
         self.length = length
@@ -22,8 +22,8 @@ class TrendlinesWithBreaks:
         self.last_pl = np.nan
         self.last_ph_idx = -1
         self.last_pl_idx = -1
-        self.upper_active = True
-        self.lower_active = True
+        self.upper_active = False
+        self.lower_active = False
 
     def pivot_high(self, series):
         """Calculate pivot high points"""
@@ -49,6 +49,12 @@ class TrendlinesWithBreaks:
             return close.rolling(window=self.length).std() / self.length * self.mult
         return pd.Series(np.zeros(len(close)), index=close.index)
 
+    def check_intersection(self, upper, lower, i):
+        """Check if upper and lower trendlines intersect"""
+        if not np.isnan(upper.iloc[i]) and not np.isnan(lower.iloc[i]):
+            return abs(upper.iloc[i] - lower.iloc[i]) < 100  # Threshold for intersection (adjust as needed)
+        return False
+
     def process(self, high, low, close):
         close = pd.Series(close, index=range(len(close)))
         high = pd.Series(high, index=range(len(high)))
@@ -67,28 +73,18 @@ class TrendlinesWithBreaks:
 
         for i in range(len(close)):
             # Update pivot highs
-            if not np.isnan(ph.iloc[i]):
+            if not np.isnan(ph.iloc[i]) and not self.upper_active:
                 self.last_ph = ph.iloc[i]
                 self.last_ph_idx = i
                 self.slope_ph = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_ph
                 self.upper_active = True
-                # Reset lower trendline if new high pivot
-                if self.last_pl_idx > self.last_ph_idx:
-                    self.last_pl = np.nan
-                    self.last_pl_idx = -1
-                    self.lower_active = False
 
             # Update pivot lows
-            if not np.isnan(pl.iloc[i]):
+            if not np.isnan(pl.iloc[i]) and not self.lower_active:
                 self.last_pl = pl.iloc[i]
                 self.last_pl_idx = i
                 self.slope_pl = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_pl
                 self.lower_active = True
-                # Reset upper trendline if new low pivot
-                if self.last_ph_idx > self.last_pl_idx:
-                    self.last_ph = np.nan
-                    self.last_ph_idx = -1
-                    self.upper_active = False
 
             # Calculate trendlines
             if self.last_ph_idx >= 0 and i >= self.last_ph_idx and self.upper_active:
@@ -98,17 +94,26 @@ class TrendlinesWithBreaks:
                 bars_since_pl = i - self.last_pl_idx
                 lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
 
+            # Check for intersection and reset
+            if self.upper_active and self.lower_active and self.check_intersection(upper_line, lower_line, i):
+                self.upper_active = False
+                self.lower_active = False
+                self.last_ph = np.nan
+                self.last_pl = np.nan
+                self.last_ph_idx = -1
+                self.last_pl_idx = -1
+
             # Detect breaks
             if self.last_ph_idx >= 0 and not np.isnan(upper_line.iloc[i]) and self.upper_active:
                 if close.iloc[i] > upper_line.iloc[i]:
                     upos.iloc[i] = 1
-                    self.upper_active = False  # Reset upper trendline after breakout
+                    self.upper_active = False
                     self.last_ph = np.nan
                     self.last_ph_idx = -1
             if self.last_pl_idx >= 0 and not np.isnan(lower_line.iloc[i]) and self.lower_active:
                 if close.iloc[i] < lower_line.iloc[i]:
                     dnos.iloc[i] = 1
-                    self.lower_active = False  # Reset lower trendline after breakout
+                    self.lower_active = False
                     self.last_pl = np.nan
                     self.last_pl_idx = -1
 
@@ -151,7 +156,7 @@ def create_plot(df, results):
     plt.plot(upper_times, valid_upper, label='Upper Trendline', color='teal', linestyle='--')
     plt.plot(lower_times, valid_lower, label='Lower Trendline', color='red', linestyle='--')
     
-    # Plot breaks - adjust position to be exactly on the trendline at breakout
+    # Plot breaks - at trendline values
     up_breaks = df[results['up_breaks']]
     down_breaks = df[results['down_breaks']]
     up_break_indices = up_breaks.index
