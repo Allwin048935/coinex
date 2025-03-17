@@ -22,6 +22,8 @@ class TrendlinesWithBreaks:
         self.last_pl = np.nan
         self.last_ph_idx = -1
         self.last_pl_idx = -1
+        self.upper_active = True
+        self.lower_active = True
 
     def pivot_high(self, series):
         """Calculate pivot high points"""
@@ -57,7 +59,7 @@ class TrendlinesWithBreaks:
         pl = self.pivot_low(low)
         slope = self.calculate_slope(close)
 
-        # Initialize trendlines
+        # Initialize trendlines and breakout trackers
         upper_line = pd.Series(np.nan, index=close.index)
         lower_line = pd.Series(np.nan, index=close.index)
         upos = pd.Series(0, index=close.index)
@@ -69,34 +71,46 @@ class TrendlinesWithBreaks:
                 self.last_ph = ph.iloc[i]
                 self.last_ph_idx = i
                 self.slope_ph = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_ph
+                self.upper_active = True
                 # Reset lower trendline if new high pivot
                 if self.last_pl_idx > self.last_ph_idx:
                     self.last_pl = np.nan
                     self.last_pl_idx = -1
+                    self.lower_active = False
 
             # Update pivot lows
             if not np.isnan(pl.iloc[i]):
                 self.last_pl = pl.iloc[i]
                 self.last_pl_idx = i
                 self.slope_pl = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_pl
+                self.lower_active = True
                 # Reset upper trendline if new low pivot
                 if self.last_ph_idx > self.last_pl_idx:
                     self.last_ph = np.nan
                     self.last_ph_idx = -1
+                    self.upper_active = False
 
             # Calculate trendlines
-            if self.last_ph_idx >= 0 and i >= self.last_ph_idx:
+            if self.last_ph_idx >= 0 and i >= self.last_ph_idx and self.upper_active:
                 bars_since_ph = i - self.last_ph_idx
                 upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
-            if self.last_pl_idx >= 0 and i >= self.last_pl_idx:
+            if self.last_pl_idx >= 0 and i >= self.last_pl_idx and self.lower_active:
                 bars_since_pl = i - self.last_pl_idx
                 lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
 
             # Detect breaks
-            if self.last_ph_idx >= 0 and not np.isnan(upper_line.iloc[i]):
-                upos.iloc[i] = 1 if close.iloc[i] > upper_line.iloc[i] else 0
-            if self.last_pl_idx >= 0 and not np.isnan(lower_line.iloc[i]):
-                dnos.iloc[i] = 1 if close.iloc[i] < lower_line.iloc[i] else 0
+            if self.last_ph_idx >= 0 and not np.isnan(upper_line.iloc[i]) and self.upper_active:
+                if close.iloc[i] > upper_line.iloc[i]:
+                    upos.iloc[i] = 1
+                    self.upper_active = False  # Reset upper trendline after breakout
+                    self.last_ph = np.nan
+                    self.last_ph_idx = -1
+            if self.last_pl_idx >= 0 and not np.isnan(lower_line.iloc[i]) and self.lower_active:
+                if close.iloc[i] < lower_line.iloc[i]:
+                    dnos.iloc[i] = 1
+                    self.lower_active = False  # Reset lower trendline after breakout
+                    self.last_pl = np.nan
+                    self.last_pl_idx = -1
 
         # Detect breakouts
         up_breaks = (upos.diff() > 0) & (upos == 1)
@@ -137,11 +151,18 @@ def create_plot(df, results):
     plt.plot(upper_times, valid_upper, label='Upper Trendline', color='teal', linestyle='--')
     plt.plot(lower_times, valid_lower, label='Lower Trendline', color='red', linestyle='--')
     
-    # Plot breaks
+    # Plot breaks - adjust position to be exactly on the trendline at breakout
     up_breaks = df[results['up_breaks']]
     down_breaks = df[results['down_breaks']]
-    plt.scatter(up_breaks['timestamp'], up_breaks['close'], color='green', label='Up Break', marker='^', s=100)
-    plt.scatter(down_breaks['timestamp'], down_breaks['close'], color='red', label='Down Break', marker='v', s=100)
+    up_break_indices = up_breaks.index
+    down_break_indices = down_breaks.index
+    up_break_trendline_values = results['upper'][up_break_indices]
+    down_break_trendline_values = results['lower'][down_break_indices]
+    
+    plt.scatter(up_breaks['timestamp'], up_break_trendline_values, 
+                color='green', label='Up Break', marker='^', s=100, zorder=5)
+    plt.scatter(down_breaks['timestamp'], down_break_trendline_values, 
+                color='red', label='Down Break', marker='v', s=100, zorder=5)
     
     plt.title(f'BTC/USDT Trendlines with Breaks - {datetime.now().strftime("%Y-%m-%d %H:%M")}')
     plt.xlabel('Time')
