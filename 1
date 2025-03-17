@@ -7,50 +7,52 @@ import telegram
 from io import BytesIO
 import config  # Import Telegram credentials from config.py
 
-# Trendlines with Breaks class - Fixed trendline calculation
+# Trendlines with Breaks class - Updated for multiple trendline sets
 class TrendlinesWithBreaks:
-    def __init__(self, length=14, mult=1.0, calc_method='stdev', backpaint=True):
+    def __init__(self, length=14, mult=0.5, calc_method='stdev', backpaint=True):
         self.length = length
         self.mult = mult
         self.calc_method = calc_method.lower()
         self.backpaint = backpaint
-        self.slope_ph = 0.0
-        self.slope_pl = 0.0
-        self.last_ph = np.nan
-        self.last_pl = np.nan
-        self.last_ph_idx = -1
-        self.last_pl_idx = -1
+        # Store multiple trendline sets as lists of (start_idx, end_idx, slope, pivot_value)
+        self.upper_trendlines = []  # List of (start_idx, end_idx, slope, pivot_value)
+        self.lower_trendlines = []  # List of (start_idx, end_idx, slope, pivot_value)
         self.upper_active = False
         self.lower_active = False
+        self.last_ph_idx = -1
+        self.last_pl_idx = -1
 
     def pivot_high(self, series):
-        """Calculate pivot high points"""
+        """Calculate pivot high points with improved sensitivity"""
         pivots = pd.Series(np.nan, index=series.index)
         for i in range(self.length, len(series) - self.length):
-            if (series.iloc[i] > series.iloc[i - self.length:i].max() and 
-                series.iloc[i] > series.iloc[i + 1:i + self.length + 1].max()):
+            left_max = series.iloc[i - self.length:i].max()
+            right_max = series.iloc[i + 1:i + self.length + 1].max()
+            if series.iloc[i] > left_max and series.iloc[i] > right_max:
                 pivots.iloc[i] = series.iloc[i]
         return pivots
 
     def pivot_low(self, series):
-        """Calculate pivot low points"""
+        """Calculate pivot low points with improved sensitivity"""
         pivots = pd.Series(np.nan, index=series.index)
         for i in range(self.length, len(series) - self.length):
-            if (series.iloc[i] < series.iloc[i - self.length:i].min() and 
-                series.iloc[i] < series.iloc[i + 1:i + self.length + 1].min()):
+            left_min = series.iloc[i - self.length:i].min()
+            right_min = series.iloc[i + 1:i + self.length + 1].min()
+            if series.iloc[i] < left_min and series.iloc[i] < right_min:
                 pivots.iloc[i] = series.iloc[i]
         return pivots
 
     def calculate_slope(self, close):
-        """Calculate slope based on selected method"""
+        """Calculate slope with better scaling for visuals"""
         if self.calc_method == 'stdev':
+            # Use a smaller slope to make trendlines less steep and more visually appealing
             return close.rolling(window=self.length).std() / self.length * self.mult
         return pd.Series(np.zeros(len(close)), index=close.index)
 
     def check_intersection(self, upper_val, lower_val):
         """Check if upper and lower trendlines intersect"""
         if not np.isnan(upper_val) and not np.isnan(lower_val):
-            return upper_val <= lower_val  # Upper trendline crosses below or equal to lower trendline
+            return upper_val <= lower_val
         return False
 
     def process(self, high, low, close):
@@ -64,85 +66,98 @@ class TrendlinesWithBreaks:
         slope = self.calculate_slope(close)
 
         # Initialize trendlines and breakout trackers
-        upper_line = pd.Series(np.nan, index=close.index)
-        lower_line = pd.Series(np.nan, index=close.index)
+        upper_lines = pd.Series(np.nan, index=close.index)
+        lower_lines = pd.Series(np.nan, index=close.index)
         upos = pd.Series(0, index=close.index)
         dnos = pd.Series(0, index=close.index)
 
         for i in range(len(close)):
             # Update pivot highs
-            if not np.isnan(ph.iloc[i]) and not self.upper_active:
-                self.last_ph = ph.iloc[i]
-                self.last_ph_idx = i
-                self.slope_ph = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_ph
+            if not np.isnan(ph.iloc[i]) and (not self.upper_active or self.last_ph_idx < i - self.length):
+                self.upper_trendlines.append((i, i, slope.iloc[i], ph.iloc[i]))
                 self.upper_active = True
+                self.last_ph_idx = i
 
             # Update pivot lows
-            if not np.isnan(pl.iloc[i]) and not self.lower_active:
-                self.last_pl = pl.iloc[i]
-                self.last_pl_idx = i
-                self.slope_pl = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_pl
+            if not np.isnan(pl.iloc[i]) and (not self.lower_active or self.last_pl_idx < i - self.length):
+                self.lower_trendlines.append((i, i, slope.iloc[i], pl.iloc[i]))
                 self.lower_active = True
+                self.last_pl_idx = i
 
-            # Calculate trendlines
-            if self.upper_active and i >= self.last_ph_idx:
-                bars_since_ph = i - self.last_ph_idx
-                if self.backpaint:
-                    # Backpaint: calculate trendline values for past bars
-                    for j in range(max(self.last_ph_idx - self.length, 0), i + 1):
-                        offset = j - self.last_ph_idx
-                        upper_line.iloc[j] = self.last_ph - self.slope_ph * offset
-                else:
-                    upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
+            # Calculate all active trendlines
+            current_upper = np.nan
+            current_lower = np.nan
+            upper_to_remove = []
+            lower_to_remove = []
 
-            if self.lower_active and i >= self.last_pl_idx:
-                bars_since_pl = i - self.last_pl_idx
-                if self.backpaint:
-                    # Backpaint: calculate trendline values for past bars
-                    for j in range(max(self.last_pl_idx - self.length, 0), i + 1):
-                        offset = j - self.last_pl_idx
-                        lower_line.iloc[j] = self.last_pl + self.slope_pl * offset
-                else:
-                    lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
+            # Process upper trendlines
+            for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.upper_trendlines):
+                if i >= start_idx:
+                    bars_since = i - start_idx
+                    upper_val = pivot_val - slope_val * bars_since
+                    if self.backpaint:
+                        for j in range(max(start_idx - self.length, 0), i + 1):
+                            offset = j - start_idx
+                            upper_lines.iloc[j] = pivot_val - slope_val * offset
+                    else:
+                        upper_lines.iloc[i] = upper_val
+                    current_upper = upper_val
+                    self.upper_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
 
-            # Check for intersection and reset
-            if self.upper_active and self.lower_active and self.check_intersection(upper_line.iloc[i], lower_line.iloc[i]):
+            # Process lower trendlines
+            for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.lower_trendlines):
+                if i >= start_idx:
+                    bars_since = i - start_idx
+                    lower_val = pivot_val + slope_val * bars_since
+                    if self.backpaint:
+                        for j in range(max(start_idx - self.length, 0), i + 1):
+                            offset = j - start_idx
+                            lower_lines.iloc[j] = pivot_val + slope_val * offset
+                    else:
+                        lower_lines.iloc[i] = lower_val
+                    current_lower = lower_val
+                    self.lower_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
+
+            # Check for intersection and breakouts
+            if self.upper_active and self.lower_active and self.check_intersection(current_upper, current_lower):
                 self.upper_active = False
                 self.lower_active = False
-                self.last_ph = np.nan
-                self.last_pl = np.nan
-                self.last_ph_idx = -1
-                self.last_pl_idx = -1
-                # Clear future trendline values after intersection
-                upper_line.iloc[i:] = np.nan
-                lower_line.iloc[i:] = np.nan
+                # Stop trendlines at intersection
+                for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.upper_trendlines):
+                    if end_idx == i:
+                        self.upper_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
+                        upper_lines.iloc[i:] = np.nan
+                for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.lower_trendlines):
+                    if end_idx == i:
+                        self.lower_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
+                        lower_lines.iloc[i:] = np.nan
 
-            # Detect breaks
-            if self.upper_active and not np.isnan(upper_line.iloc[i]):
-                if close.iloc[i] > upper_line.iloc[i]:
+            # Detect breakouts
+            if self.upper_active and not np.isnan(current_upper):
+                if close.iloc[i] > current_upper:
                     upos.iloc[i] = 1
                     self.upper_active = False
-                    self.last_ph = np.nan
-                    self.last_ph_idx = -1
-                    # Clear future trendline values after breakout
-                    upper_line.iloc[i:] = np.nan
+                    for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.upper_trendlines):
+                        if end_idx == i:
+                            self.upper_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
+                            upper_lines.iloc[i:] = np.nan
 
-            if self.lower_active and not np.isnan(lower_line.iloc[i]):
-                if close.iloc[i] < lower_line.iloc[i]:
+            if self.lower_active and not np.isnan(current_lower):
+                if close.iloc[i] < current_lower:
                     dnos.iloc[i] = 1
                     self.lower_active = False
-                    self.last_pl = np.nan
-                    self.last_pl_idx = -1
-                    # Clear future trendline values after breakout
-                    lower_line.iloc[i:] = np.nan
+                    for idx, (start_idx, end_idx, slope_val, pivot_val) in enumerate(self.lower_trendlines):
+                        if end_idx == i:
+                            self.lower_trendlines[idx] = (start_idx, i, slope_val, pivot_val)
+                            lower_lines.iloc[i:] = np.nan
 
         # Detect breakouts
         up_breaks = (upos.diff() > 0) & (upos == 1)
         down_breaks = (dnos.diff() > 0) & (dnos == 1)
 
         return {
-            'upper': upper_line,
-            'lower': lower_line,
+            'upper': upper_lines,
+            'lower': lower_lines,
             'up_breaks': up_breaks,
             'down_breaks': down_breaks
         }
@@ -188,7 +203,7 @@ def create_plot(df, results):
     plt.scatter(down_breaks['timestamp'], down_break_trendline_values, 
                 color='red', label='Down Break', marker='v', s=100, zorder=5)
     
-    plt.title(f'BTC/USDT Trendlines with Breaks - {datetime.now().strftime("%Y-%m-%d %H:%M")}')
+    plt.title(f'BTC/USDT Trendlines with Breaks - {datetime.now().strftime("%Y-%m-d %H:%M")}')
     plt.xlabel('Time')
     plt.ylabel('Price (USDT)')
     plt.legend(loc='best')
@@ -204,7 +219,7 @@ def create_plot(df, results):
 
 async def main():
     df = fetch_btcusdt_data()
-    trendlines = TrendlinesWithBreaks(length=14, mult=1.0, calc_method='stdev', backpaint=True)
+    trendlines = TrendlinesWithBreaks(length=14, mult=0.5, calc_method='stdev', backpaint=True)
     results = trendlines.process(df['high'], df['low'], df['close'])
     plot_buffer = create_plot(df, results)
     await send_to_telegram(plot_buffer)
