@@ -289,10 +289,10 @@ async def ema_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Daily Open (00:00 UTC): {daily_open}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # Check EMA (based on 5m) vs Daily Open conditions
-                if historical_data['short_ema'].iloc[-1] > daily_open and historical_data['short_ema'].iloc[-2] < daily_open:
+                if historical_data['short_ema'].iloc[-1] > daily_open:  #and historical_data['short_ema'].iloc[-2] < daily_open:
                     current_signal = 'long'
                     print(f'{symbol} Potential Buy Signal (5m Short EMA crossed over Daily Open)')
-                elif historical_data['short_ema'].iloc[-1] < daily_open and historical_data['short_ema'].iloc[-2] > daily_open:
+                elif historical_data['short_ema'].iloc[-1] < daily_open:   #and historical_data['short_ema'].iloc[-2] > daily_open:
                     current_signal = 'short'
                     print(f'{symbol} Potential Sell Signal (5m Short EMA crossed under Daily Open)')
                 else:
