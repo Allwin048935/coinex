@@ -1,73 +1,98 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-import ccxt  # For crypto exchange data
+from datetime import datetime
+import ccxt
 import telegram
 from io import BytesIO
 
-# Trendlines with Breaks class (from previous response)
+# Trendlines with Breaks class - Fixed version
 class TrendlinesWithBreaks:
     def __init__(self, length=14, mult=1.0, calc_method='stdev', backpaint=True):
         self.length = length
         self.mult = mult
         self.calc_method = calc_method.lower()
         self.backpaint = backpaint
-        self.upper = 0.0
-        self.lower = 0.0
+        self.upper = np.nan
+        self.lower = np.nan
         self.slope_ph = 0.0
         self.slope_pl = 0.0
+        self.last_ph = np.nan
+        self.last_pl = np.nan
+        self.last_ph_idx = -1
+        self.last_pl_idx = -1
 
     def pivot_high(self, series):
-        return series.where(
-            (series > series.shift(1)) & 
-            (series > series.shift(-1)) & 
-            (series > series.shift(self.length)) &
-            (series > series.shift(-self.length))
-        )
-    
+        """Calculate pivot high points"""
+        pivots = pd.Series(np.nan, index=series.index)
+        for i in range(self.length, len(series) - self.length):
+            if (series.iloc[i] > series.iloc[i - self.length:i].max() and 
+                series.iloc[i] > series.iloc[i + 1:i + self.length + 1].max()):
+                pivots.iloc[i] = series.iloc[i]
+        return pivots
+
     def pivot_low(self, series):
-        return series.where(
-            (series < series.shift(1)) & 
-            (series < series.shift(-1)) & 
-            (series < series.shift(self.length)) &
-            (series < series.shift(-self.length))
-        )
-    
+        """Calculate pivot low points"""
+        pivots = pd.Series(np.nan, index=series.index)
+        for i in range(self.length, len(series) - self.length):
+            if (series.iloc[i] < series.iloc[i - self.length:i].min() and 
+                series.iloc[i] < series.iloc[i + 1:i + self.length + 1].min()):
+                pivots.iloc[i] = series.iloc[i]
+        return pivots
+
     def calculate_slope(self, close):
-        n = np.arange(len(close))
+        """Calculate slope based on selected method"""
         if self.calc_method == 'stdev':
-            return (close.rolling(window=self.length).std() / self.length * self.mult)
+            return close.rolling(window=self.length).std() / self.length * self.mult
         return pd.Series(np.zeros(len(close)), index=close.index)
-    
+
     def process(self, high, low, close):
         close = pd.Series(close)
         high = pd.Series(high)
         low = pd.Series(low)
         
-        ph = self.pivot_high(close)
-        pl = self.pivot_low(close)
+        # Calculate pivots
+        ph = self.pivot_high(high)
+        pl = self.pivot_low(low)
         slope = self.calculate_slope(close)
-        
-        self.slope_ph = np.where(ph.notna(), slope, self.slope_ph)
-        self.slope_pl = np.where(pl.notna(), slope, self.slope_pl)
-        
-        self.upper = np.where(ph.notna(), ph, self.upper - self.slope_ph)
-        self.lower = np.where(pl.notna(), pl, self.lower + self.slope_pl)
-        
-        offset = self.length if self.backpaint else 0
-        
-        upper_line = self.upper if self.backpaint else self.upper - self.slope_ph * self.length
-        lower_line = self.lower if self.backpaint else self.lower + self.slope_pl * self.length
-        
-        upos = np.where(ph.notna(), 0, 
-                       np.where(close > (self.upper - self.slope_ph * self.length), 1, 0))
-        dnos = np.where(pl.notna(), 0, 
-                       np.where(close < (self.lower + self.slope_pl * self.length), 1, 0))
-        
-        up_breaks = (pd.Series(upos).diff() > 0) & (upos > 0)
-        down_breaks = (pd.Series(dnos).diff() > 0) & (dnos > 0)
-        
+
+        # Update slopes and trendlines
+        upper_line = pd.Series(np.nan, index=close.index)
+        lower_line = pd.Series(np.nan, index=close.index)
+        upos = pd.Series(0, index=close.index)
+        dnos = pd.Series(0, index=close.index)
+
+        for i in range(len(close)):
+            # Update pivot highs
+            if not np.isnan(ph.iloc[i]):
+                self.last_ph = ph.iloc[i]
+                self.last_ph_idx = i
+                self.slope_ph = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_ph
+
+            # Update pivot lows
+            if not np.isnan(pl.iloc[i]):
+                self.last_pl = pl.iloc[i]
+                self.last_pl_idx = i
+                self.slope_pl = slope.iloc[i] if not np.isnan(slope.iloc[i]) else self.slope_pl
+
+            # Calculate trendlines
+            if self.last_ph_idx >= 0:
+                bars_since_ph = i - self.last_ph_idx
+                upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
+            if self.last_pl_idx >= 0:
+                bars_since_pl = i - self.last_pl_idx
+                lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
+
+            # Detect breaks
+            if self.last_ph_idx >= 0 and not np.isnan(upper_line.iloc[i]):
+                upos.iloc[i] = 1 if close.iloc[i] > upper_line.iloc[i] else 0
+            if self.last_pl_idx >= 0 and not np.isnan(lower_line.iloc[i]):
+                dnos.iloc[i] = 1 if close.iloc[i] < lower_line.iloc[i] else 0
+
+        # Detect breakouts
+        up_breaks = (upos.diff() > 0) & (upos == 1)
+        down_breaks = (dnos.diff() > 0) & (dnos == 1)
+
         return {
             'upper': upper_line,
             'lower': lower_line,
@@ -85,15 +110,10 @@ async def send_to_telegram(plot_buffer):
         await bot.send_photo(chat_id=CHAT_ID, photo=plot_buffer)
 
 def fetch_btcusdt_data():
-    # Initialize exchange
     exchange = ccxt.binance()
-    
-    # Fetch last 100 hourly candles
     timeframe = '1h'
     limit = 100
     ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe, limit=limit)
-    
-    # Convert to DataFrame
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
@@ -102,7 +122,7 @@ def create_plot(df, results):
     plt.figure(figsize=(12, 6))
     
     # Plot price
-    plt.plot(df['timestamp'], df['close'], label='BTC/USDT Close', color='blue', alpha=0.5)
+    plt.plot(df['timestamp'], df['close'], label='BTC/USDT Close', color='blue', alpha=0.7)
     
     # Plot trendlines
     plt.plot(df['timestamp'], results['upper'], label='Upper Trendline', color='teal', linestyle='--')
@@ -111,14 +131,20 @@ def create_plot(df, results):
     # Plot breaks
     up_breaks = df[results['up_breaks']]
     down_breaks = df[results['down_breaks']]
-    plt.scatter(up_breaks['timestamp'], up_breaks['close'], color='green', label='Up Break', marker='^')
-    plt.scatter(down_breaks['timestamp'], down_breaks['close'], color='red', label='Down Break', marker='v')
+    plt.scatter(up_breaks['timestamp'], up_breaks['close'], color='green', label='Up Break', marker='^', s=100)
+    plt.scatter(down_breaks['timestamp'], down_breaks['close'], color='red', label='Down Break', marker='v', s=100)
     
     plt.title(f'BTC/USDT Trendlines with Breaks - {datetime.now().strftime("%Y-%m-%d %H:%M")}')
     plt.xlabel('Time')
     plt.ylabel('Price (USDT)')
-    plt.legend()
+    plt.legend(loc='best')
     plt.grid(True, alpha=0.3)
+    
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45)
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
     
     # Save to buffer
     buffer = BytesIO()
