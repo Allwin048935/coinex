@@ -7,15 +7,13 @@ import telegram
 from io import BytesIO
 import config  # Import Telegram credentials from config.py
 
-# Trendlines with Breaks class - Updated to stop at intersections
+# Trendlines with Breaks class - Fixed trendline calculation
 class TrendlinesWithBreaks:
     def __init__(self, length=14, mult=1.0, calc_method='stdev', backpaint=True):
         self.length = length
         self.mult = mult
         self.calc_method = calc_method.lower()
         self.backpaint = backpaint
-        self.upper = pd.Series(np.nan)
-        self.lower = pd.Series(np.nan)
         self.slope_ph = 0.0
         self.slope_pl = 0.0
         self.last_ph = np.nan
@@ -49,10 +47,10 @@ class TrendlinesWithBreaks:
             return close.rolling(window=self.length).std() / self.length * self.mult
         return pd.Series(np.zeros(len(close)), index=close.index)
 
-    def check_intersection(self, upper, lower, i):
+    def check_intersection(self, upper_val, lower_val):
         """Check if upper and lower trendlines intersect"""
-        if not np.isnan(upper.iloc[i]) and not np.isnan(lower.iloc[i]):
-            return abs(upper.iloc[i] - lower.iloc[i]) < 100  # Threshold for intersection (adjust as needed)
+        if not np.isnan(upper_val) and not np.isnan(lower_val):
+            return upper_val <= lower_val  # Upper trendline crosses below or equal to lower trendline
         return False
 
     def process(self, high, low, close):
@@ -87,35 +85,56 @@ class TrendlinesWithBreaks:
                 self.lower_active = True
 
             # Calculate trendlines
-            if self.last_ph_idx >= 0 and i >= self.last_ph_idx and self.upper_active:
+            if self.upper_active and i >= self.last_ph_idx:
                 bars_since_ph = i - self.last_ph_idx
-                upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
-            if self.last_pl_idx >= 0 and i >= self.last_pl_idx and self.lower_active:
+                if self.backpaint:
+                    # Backpaint: calculate trendline values for past bars
+                    for j in range(max(self.last_ph_idx - self.length, 0), i + 1):
+                        offset = j - self.last_ph_idx
+                        upper_line.iloc[j] = self.last_ph - self.slope_ph * offset
+                else:
+                    upper_line.iloc[i] = self.last_ph - self.slope_ph * bars_since_ph
+
+            if self.lower_active and i >= self.last_pl_idx:
                 bars_since_pl = i - self.last_pl_idx
-                lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
+                if self.backpaint:
+                    # Backpaint: calculate trendline values for past bars
+                    for j in range(max(self.last_pl_idx - self.length, 0), i + 1):
+                        offset = j - self.last_pl_idx
+                        lower_line.iloc[j] = self.last_pl + self.slope_pl * offset
+                else:
+                    lower_line.iloc[i] = self.last_pl + self.slope_pl * bars_since_pl
 
             # Check for intersection and reset
-            if self.upper_active and self.lower_active and self.check_intersection(upper_line, lower_line, i):
+            if self.upper_active and self.lower_active and self.check_intersection(upper_line.iloc[i], lower_line.iloc[i]):
                 self.upper_active = False
                 self.lower_active = False
                 self.last_ph = np.nan
                 self.last_pl = np.nan
                 self.last_ph_idx = -1
                 self.last_pl_idx = -1
+                # Clear future trendline values after intersection
+                upper_line.iloc[i:] = np.nan
+                lower_line.iloc[i:] = np.nan
 
             # Detect breaks
-            if self.last_ph_idx >= 0 and not np.isnan(upper_line.iloc[i]) and self.upper_active:
+            if self.upper_active and not np.isnan(upper_line.iloc[i]):
                 if close.iloc[i] > upper_line.iloc[i]:
                     upos.iloc[i] = 1
                     self.upper_active = False
                     self.last_ph = np.nan
                     self.last_ph_idx = -1
-            if self.last_pl_idx >= 0 and not np.isnan(lower_line.iloc[i]) and self.lower_active:
+                    # Clear future trendline values after breakout
+                    upper_line.iloc[i:] = np.nan
+
+            if self.lower_active and not np.isnan(lower_line.iloc[i]):
                 if close.iloc[i] < lower_line.iloc[i]:
                     dnos.iloc[i] = 1
                     self.lower_active = False
                     self.last_pl = np.nan
                     self.last_pl_idx = -1
+                    # Clear future trendline values after breakout
+                    lower_line.iloc[i:] = np.nan
 
         # Detect breakouts
         up_breaks = (upos.diff() > 0) & (upos == 1)
