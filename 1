@@ -14,7 +14,6 @@ class TrendlinesWithBreaks:
         self.mult = mult
         self.primary_extension = primary_extension
         self.secondary_extension = secondary_extension
-        # Store trendlines: (start_idx, end_idx, slope, start_value, last_value)
         self.primary_upper = []
         self.primary_lower = []
         self.secondary_upper = []
@@ -122,15 +121,15 @@ class TrendlinesWithBreaks:
                 self.last_secondary_pl_idx = i
 
             # Process trendlines
-            for lines, trendlines, is_upper, active_flag in [
-                (primary_upper_lines, self.primary_upper, True, self.primary_upper_active),
-                (primary_lower_lines, self.primary_lower, False, self.primary_lower_active),
-                (secondary_upper_lines, self.secondary_upper, True, self.secondary_upper_active),
-                (secondary_lower_lines, self.secondary_lower, False, self.secondary_lower_active)
+            for lines, trendlines, is_upper, active_flag, extension in [
+                (primary_upper_lines, self.primary_upper, True, self.primary_upper_active, self.primary_extension),
+                (primary_lower_lines, self.primary_lower, False, self.primary_lower_active, self.primary_extension),
+                (secondary_upper_lines, self.secondary_upper, True, self.secondary_upper_active, self.secondary_extension),
+                (secondary_lower_lines, self.secondary_lower, False, self.secondary_lower_active, self.secondary_extension)
             ]:
                 current_val = np.nan
                 for idx, (start_idx, end_idx, slope_val, start_val, last_val) in enumerate(trendlines):
-                    if i >= start_idx and (i <= end_idx + (self.primary_extension if 'primary' in lines.name else self.secondary_extension)):
+                    if i >= start_idx and i <= end_idx + extension:
                         bars_since = i - start_idx
                         val = start_val + (slope_val * bars_since if not is_upper else -slope_val * bars_since)
                         lines.iloc[i] = val
@@ -140,16 +139,17 @@ class TrendlinesWithBreaks:
                 # Breakout detection
                 if active_flag and not np.isnan(current_val):
                     if (is_upper and close.iloc[i] > current_val) or (not is_upper and close.iloc[i] < current_val):
-                        (primary_upos if is_upper and 'primary' in lines.name else 
-                         primary_dnos if not is_upper and 'primary' in lines.name else 
-                         secondary_upos if is_upper else secondary_dnos).iloc[i] = 1
-                        if is_upper and 'primary' in lines.name:
+                        if lines is primary_upper_lines:
+                            primary_upos.iloc[i] = 1
                             self.primary_upper_active = False
-                        elif not is_upper and 'primary' in lines.name:
+                        elif lines is primary_lower_lines:
+                            primary_dnos.iloc[i] = 1
                             self.primary_lower_active = False
-                        elif is_upper:
+                        elif lines is secondary_upper_lines:
+                            secondary_upos.iloc[i] = 1
                             self.secondary_upper_active = False
-                        else:
+                        elif lines is secondary_lower_lines:
+                            secondary_dnos.iloc[i] = 1
                             self.secondary_lower_active = False
                         for idx, (start_idx, end_idx, slope_val, start_val, last_val) in enumerate(trendlines):
                             if end_idx == i:
@@ -190,10 +190,8 @@ def fetch_btcusdt_data():
 def create_plot(df, results):
     plt.figure(figsize=(14, 7))
     
-    # Plot price
     plt.plot(df['timestamp'], df['close'], label='BTC/USDT Close', color='blue', alpha=0.7)
     
-    # Plot primary trendlines
     for line, color, label, width in [
         (results['primary_upper'], 'teal', 'Primary Upper', 2),
         (results['primary_lower'], 'red', 'Primary Lower', 2),
@@ -204,7 +202,6 @@ def create_plot(df, results):
         times = df['timestamp'][line.notna()]
         plt.plot(times, valid, label=label, color=color, linestyle='--', linewidth=width)
 
-    # Plot breaks
     for breaks, color, marker, label in [
         (results['primary_up_breaks'], 'green', '^', 'Primary Up Break'),
         (results['primary_down_breaks'], 'red', 'v', 'Primary Down Break'),
@@ -213,9 +210,9 @@ def create_plot(df, results):
     ]:
         break_df = df[breaks]
         break_indices = break_df.index
-        break_values = (results['primary_upper'] if 'primary_up' in label else 
-                       results['primary_lower'] if 'primary_down' in label else 
-                       results['secondary_upper'] if 'secondary_up' in label else 
+        break_values = (results['primary_upper'] if 'primary_up' in label.lower() else 
+                       results['primary_lower'] if 'primary_down' in label.lower() else 
+                       results['secondary_upper'] if 'secondary_up' in label.lower() else 
                        results['secondary_lower'])[break_indices]
         plt.scatter(break_df['timestamp'], break_values, color=color, marker=marker, s=100, zorder=5, label=label)
     
