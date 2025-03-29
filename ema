@@ -12,7 +12,7 @@ from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 trading_params = {
     "market_type": "FUTURES",
     "margin_mode": "isolated",
-    "leverage": 3
+    "leverage": 10
 }
 
 # API endpoints (updated base URL to /v2/)
@@ -45,8 +45,8 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 3
-long_ema_period = 30
+short_ema_period = 5
+long_ema_period = 100
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -68,10 +68,10 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     
     if side == 'long':
         take_profit_price = str(round(entry_price * 1.30, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 0.98, 6))    # 5% loss
+        stop_loss_price = str(round(entry_price * 0.90, 6))    # 5% loss
     else:  # short
         take_profit_price = str(round(entry_price * 0.70, 6))  # 5% profit
-        stop_loss_price = str(round(entry_price * 1.02, 6))    # 5% loss
+        stop_loss_price = str(round(entry_price * 1.10, 6))    # 5% loss
 
     tp_params = {
         "market": symbol,
@@ -272,10 +272,10 @@ async def ema_strategy():
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
                 # Check EMA conditions
-                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1] and historical_data['short_ema'].iloc[-2] < historical_data['long_ema'].iloc[-2]:
+                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
                     current_signal = 'long'
                     print(f'{symbol} Potential Buy Signal (Crossover)')
-                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1] and historical_data['short_ema'].iloc[-2] > historical_data['long_ema'].iloc[-2]:
+                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]:
                     current_signal = 'short'
                     print(f'{symbol} Potential Sell Signal (Crossunder)')
                 else:
