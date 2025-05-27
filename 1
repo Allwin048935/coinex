@@ -1,250 +1,389 @@
-import numpy as np
+import ccxt.async_support as ccxt
 import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import datetime
-import ccxt
-import telegram
-from io import BytesIO
-import config
+import requests
+import time
+import hmac
+import hashlib
+import json
+import asyncio
+from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-class TrendlinesWithBreaks:
-    def __init__(self, primary_length=20, secondary_length=10, mult=1.0, primary_extension=50, secondary_extension=25):
-        self.primary_length = primary_length
-        self.secondary_length = secondary_length
-        self.mult = mult
-        self.primary_extension = primary_extension
-        self.secondary_extension = secondary_extension
-        self.primary_upper = []
-        self.primary_lower = []
-        self.secondary_upper = []
-        self.secondary_lower = []
-        self.primary_upper_active = False
-        self.primary_lower_active = False
-        self.secondary_upper_active = False
-        self.secondary_lower_active = False
-        self.last_primary_ph_idx = -1
-        self.last_primary_pl_idx = -1
-        self.last_secondary_ph_idx = -1
-        self.last_secondary_pl_idx = -1
+# Trading parameters
+trading_params = {
+    "market_type": "FUTURES",
+    "margin_mode": "isolated",
+    "leverage": 1,
+    "position_value_usd": 12,  # $15 position
+    "close_value_usd": 11,     # Close $14, leaving $1
+}
 
-    def pivot_high(self, series, length):
-        pivots = pd.Series(np.nan, index=series.index)
-        half_length = length // 2
-        for i in range(length, len(series) - half_length):
-            left_max = series.iloc[i - length:i].max()
-            right_max = series.iloc[i + 1:i + half_length + 1].max()
-            if series.iloc[i] > left_max and series.iloc[i] > right_max:
-                pivots.iloc[i] = series.iloc[i]
-        return pivots
+# API endpoints
+TAKE_PROFIT_URL = "https://api.coinex.com/v2/futures/set-position-take-profit"
+STOP_LOSS_URL = "https://api.coinex.com/v2/futures/set-position-stop-loss"
+TELEGRAM_API_URL = "https://api.telegram.org/bot{}/sendMessage"
 
-    def pivot_low(self, series, length):
-        pivots = pd.Series(np.nan, index=series.index)
-        half_length = length // 2
-        for i in range(length, len(series) - half_length):
-            left_min = series.iloc[i - length:i].min()
-            right_min = series.iloc[i + 1:i + half_length + 1].min()
-            if series.iloc[i] < left_min and series.iloc[i] < right_min:
-                pivots.iloc[i] = series.iloc[i]
-        return pivots
+# Fetch symbols dynamically from CoinEx API
+def fetch_coinex_symbols():
+    url = "https://api.coinex.com/v2/futures/market"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        symbols_info = {
+            s['market']: float(s['min_amount'])
+            for s in data['data']
+            if s['quote_ccy'] == 'USDT' and s['is_market_available']
+        }
+        return symbols_info
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching symbols from CoinEx: {e}")
+        return {}
 
-    def calculate_slope(self, close, length):
-        return close.rolling(window=length).std() * self.mult / length
+# Create a CoinEx client
+exchange = ccxt.coinex({
+    'apiKey': COINEX_API_KEY,
+    'secret': COINEX_API_SECRET,
+    'options': {'defaultType': 'swap'},
+    'enableRateLimit': True
+})
 
-    def check_intersection(self, upper_val, lower_val):
-        if not np.isnan(upper_val) and not np.isnan(lower_val):
-            return upper_val <= lower_val
+# EMA strategy parameters
+short_ema_period = 5
+long_ema_period = 100
+
+# Get initial symbols and their min_amounts
+symbols_info = fetch_coinex_symbols()
+symbols = list(symbols_info.keys())
+
+# Track last order types, open orders, and last signals
+last_order_types = {symbol: None for symbol in symbols}
+open_orders = {symbol: None for symbol in symbols}
+last_signals = {symbol: None for symbol in symbols}
+
+# Function to send Telegram message
+def send_telegram_message(message):
+    try:
+        url = TELEGRAM_API_URL.format(TELEGRAM_BOT_TOKEN)
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message
+        }
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        print(f"Telegram message sent: {message}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending Telegram message: {e}")
+
+# Function to generate signature for CoinEx API
+def generate_signature(method, path, body, timestamp, secret):
+    prepared_str = f"{method}{path}{body}{timestamp}"
+    return hmac.new(bytes(secret, 'latin-1'), bytes(prepared_str, 'latin-1'), hashlib.sha256).hexdigest().lower()
+
+# Function to set take-profit and stop-loss
+def set_take_profit_stop_loss(symbol, side, entry_price):
+    timestamp = str(int(time.time() * 1000))
+    if side == 'long':
+        take_profit_price = str(round(entry_price * 1.30, 6))  # 30% profit
+        stop_loss_price = str(round(entry_price * 0.90, 6))    # 10% loss
+    else:  # short
+        take_profit_price = str(round(entry_price * 0.70, 6))  # 30% profit
+        stop_loss_price = str(round(entry_price * 1.10, 6))    # 10% loss
+
+    tp_params = {
+        "market": symbol,
+        "market_type": "FUTURES",
+        "take_profit_type": "mark_price",
+        "take_profit_price": take_profit_price
+    }
+    tp_body = json.dumps(tp_params, separators=(',', ':'))
+    tp_path = "/v2/futures/set-position-take-profit"
+    tp_signature = generate_signature("POST", tp_path, tp_body, timestamp, COINEX_API_SECRET)
+    tp_headers = {
+        "X-COINEX-KEY": COINEX_API_KEY,
+        "X-COINEX-SIGN": tp_signature,
+        "X-COINEX-TIMESTAMP": timestamp,
+        "Content-Type": "application/json"
+    }
+
+    sl_params = {
+        "market": symbol,
+        "market_type": "FUTURES",
+        "stop_loss_type": "mark_price",
+        "stop_loss_price": stop_loss_price
+    }
+    sl_body = json.dumps(sl_params, separators=(',', ':'))
+    sl_path = "/v2/futures/set-position-stop-loss"
+    sl_signature = generate_signature("POST", sl_path, sl_body, timestamp, COINEX_API_SECRET)
+    sl_headers = {
+        "X-COINEX-KEY": COINEX_API_KEY,
+        "X-COINEX-SIGN": sl_signature,
+        "X-COINEX-TIMESTAMP": timestamp,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        tp_response = requests.post(TAKE_PROFIT_URL, headers=tp_headers, data=tp_body)
+        tp_response.raise_for_status()
+        tp_data = tp_response.json()
+        if tp_data.get('code') == 0:
+            print(f"Take-profit set for {symbol}: {take_profit_price}")
+        else:
+            print(f"Failed to set take-profit for {symbol}: {tp_data.get('message')}")
+
+        sl_response = requests.post(STOP_LOSS_URL, headers=sl_headers, data=sl_body)
+        sl_response.raise_for_status()
+        sl_data = sl_response.json()
+        if sl_data.get('code') == 0:
+            print(f"Stop-loss set for {symbol}: {stop_loss_price}")
+        else:
+            print(f"Failed to set stop-loss for {symbol}: {sl_data.get('message')}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error setting take-profit/stop-loss for {symbol}: {e}")
+
+# Async function to set trading parameters
+async def set_trading_parameters(symbol):
+    try:
+        if not symbol.endswith("USDT"):
+            raise ValueError(f"Invalid symbol format: {symbol}")
+        await exchange.set_leverage(trading_params['leverage'], symbol)
+        await exchange.set_margin_mode(trading_params['margin_mode'], symbol, {'leverage': trading_params['leverage']})
+        print(f"Set parameters for {symbol}: Leverage {trading_params['leverage']}x, {trading_params['margin_mode']} mode")
+        return True
+    except Exception as e:
+        print(f"Error setting trading parameters for {symbol}: {e}")
         return False
 
-    def process(self, high, low, close):
-        close = pd.Series(close, index=range(len(close)))
-        high = pd.Series(high, index=range(len(high)))
-        low = pd.Series(low, index=range(len(low)))
+# Function to calculate EMA
+def calculate_ema(df, period, column='close'):
+    return df[column].ewm(span=period, adjust=False).mean()
 
-        primary_ph = self.pivot_high(high, self.primary_length)
-        primary_pl = self.pivot_low(low, self.primary_length)
-        secondary_ph = self.pivot_high(high, self.secondary_length)
-        secondary_pl = self.pivot_low(low, self.secondary_length)
-        
-        primary_slope = self.calculate_slope(close, self.primary_length)
-        secondary_slope = self.calculate_slope(close, self.secondary_length)
+# Async function to fetch historical data
+async def fetch_ohlcv(symbol, timeframe, limit):
+    try:
+        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['short_ema'] = calculate_ema(df, short_ema_period)
+        df['long_ema'] = calculate_ema(df, long_ema_period)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except Exception as e:
+        print(f"Error fetching OHLCV for {symbol}: {e}")
+        return None
 
-        primary_upper_lines = pd.Series(np.nan, index=close.index)
-        primary_lower_lines = pd.Series(np.nan, index=close.index)
-        secondary_upper_lines = pd.Series(np.nan, index=close.index)
-        secondary_lower_lines = pd.Series(np.nan, index=close.index)
-        primary_upos = pd.Series(0, index=close.index)
-        primary_dnos = pd.Series(0, index=close.index)
-        secondary_upos = pd.Series(0, index=close.index)
-        secondary_dnos = pd.Series(0, index=close.index)
+# Function to calculate quantity based on USD value
+def calculate_quantity(symbol, latest_close, usd_value):
+    min_amount = symbols_info.get(symbol, 0.0001)
+    quantity = max(min_amount, usd_value / latest_close * trading_params['leverage'])
+    return round(quantity, 6)
 
-        for i in range(len(close)):
-            if not np.isnan(primary_ph.iloc[i]) and (not self.primary_upper_active or self.last_primary_ph_idx < i - self.primary_length):
-                if self.primary_upper and self.primary_upper[-1][4]:
-                    last_end_idx, _, last_slope, _, last_value = self.primary_upper[-1]
-                    self.primary_upper.append((last_end_idx, i, last_slope, last_value, last_value))
+# Async function to check current position
+async def check_position(symbol):
+    try:
+        positions = await exchange.fetch_positions([symbol])
+        for pos in positions:
+            if pos['symbol'] == symbol and float(pos['contracts']) > 0:
+                return pos['side'].lower(), float(pos['contracts'])
+        return None, 0
+    except Exception as e:
+        print(f"Error checking position for {symbol}: {e}")
+        return None, 0
+
+# Async function to place a market buy order
+async def place_market_buy_order(symbol, quantity, order_num, retries=5, delay=1):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if not await set_trading_parameters(symbol):
+                raise Exception("Failed to set trading parameters")
+            order = await exchange.create_market_buy_order(symbol, amount=quantity)
+            print(f"Order #{order_num} - Market Buy Order placed for {symbol}: {order['id']}, Quantity: {quantity}")
+            latest_price = float((await exchange.fetch_ticker(symbol))['close'])
+            set_take_profit_stop_loss(symbol, 'long', latest_price)
+            return order['id']
+        except Exception as e:
+            attempt += 1
+            print(f"Order #{order_num} - Error placing Market Buy Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    print(f"Order #{order_num} - Failed to place Market Buy Order for {symbol} after {retries} attempts.")
+    send_telegram_message(f"Failed to place Market Buy Order for {symbol} after {retries} attempts.")
+    return None
+
+# Async function to place a market sell order
+async def place_market_sell_order(symbol, quantity, order_num, retries=5, delay=1):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if not await set_trading_parameters(symbol):
+                raise Exception("Failed to set trading parameters")
+            order = await exchange.create_market_sell_order(symbol, amount=quantity)
+            print(f"Order #{order_num} - Market Sell Order placed for {symbol}: {order['id']}, Quantity: {quantity}")
+            latest_price = float((await exchange.fetch_ticker(symbol))['close'])
+            set_take_profit_stop_loss(symbol, 'short', latest_price)
+            return order['id']
+        except Exception as e:
+            attempt += 1
+            print(f"Order #{order_num} - Error placing Market Sell Order for {symbol} (Attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    print(f"Order #{order_num} - Failed to place Market Sell Order for {symbol} after {retries} attempts.")
+    send_telegram_message(f"Failed to place Market Sell Order for {symbol} after {retries} attempts.")
+    return None
+
+# Async function to cancel an open order
+async def cancel_open_order(symbol, order_id, retries=5, delay=1):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if order_id:
+                await exchange.cancel_order(order_id, symbol)
+                print(f"Cancelled open order for {symbol}: {order_id}")
+                return True
+            return False
+        except Exception as e:
+            attempt += 1
+            print(f"Error cancelling order for {symbol}: {e} (Attempt {attempt}/{retries})")
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    print(f"Failed to cancel open order for {symbol}: {order_id} after {retries} attempts.")
+    send_telegram_message(f"Failed to cancel open order for {symbol}: {order_id} after {retries} attempts.")
+    return False
+
+# Main async trading function
+async def ema_strategy():
+    global symbols, symbols_info, last_order_types, open_orders, last_signals
+
+    while True:
+        try:
+            # Refresh symbols list
+            symbols_info = fetch_coinex_symbols()
+            symbols = list(symbols_info.keys())
+
+            # Update tracking dictionaries
+            last_order_types = {symbol: last_order_types.get(symbol) for symbol in symbols}
+            open_orders = {symbol: open_orders.get(symbol) for symbol in symbols}
+            last_signals = {symbol: last_signals.get(symbol) for symbol in symbols}
+
+            trades_placed = 0
+
+            for i, symbol in enumerate(symbols, 1):
+                symbol = symbol.upper()
+                print(f"\nProcessing pair #{i}/{len(symbols)}: {symbol}")
+
+                historical_data = await fetch_ohlcv(symbol, time_interval, 100)
+                if historical_data is None or len(historical_data) < long_ema_period:
+                    print(f"Not enough data for {symbol}. Skipping...")
+                    continue
+
+                latest_candle = await exchange.fetch_ticker(symbol)
+                if 'close' not in latest_candle:
+                    print(f"Error: 'close' not found in latest_candle for {symbol}")
+                    continue
+
+                latest_close = float(latest_candle['close'])
+                if latest_close is None:
+                    print(f"Error: latest_close is None for {symbol}")
+                    continue
+
+                # Calculate quantities for $15 and $14
+                full_quantity = calculate_quantity(symbol, latest_close, trading_params['position_value_usd'])
+                close_quantity = calculate_quantity(symbol, latest_close, trading_params['close_value_usd'])
+                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Full Quantity: {full_quantity}, Close Quantity: {close_quantity}")
+
+                # Check EMA conditions
+                if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
+                    current_signal = 'long'
+                    print(f'{symbol} Potential Buy Signal (Crossover)')
+                elif historical_data['short_ema'].iloc[-1] < historical_data['long_ema'].iloc[-1]:
+                    current_signal = 'short'
+                    print(f'{symbol} Potential Sell Signal (Crossunder)')
                 else:
-                    self.primary_upper.append((i, i, primary_slope.iloc[i], primary_ph.iloc[i], primary_ph.iloc[i]))
-                self.primary_upper_active = True
-                self.last_primary_ph_idx = i
+                    current_signal = None
+                    print(f'{symbol} No clear signal (EMAs equal)')
+                    continue
 
-            if not np.isnan(primary_pl.iloc[i]) and (not self.primary_lower_active or self.last_primary_pl_idx < i - self.primary_length):
-                if self.primary_lower and self.primary_lower[-1][4]:
-                    last_end_idx, _, last_slope, _, last_value = self.primary_lower[-1]
-                    self.primary_lower.append((last_end_idx, i, last_slope, last_value, last_value))
-                else:
-                    self.primary_lower.append((i, i, primary_slope.iloc[i], primary_pl.iloc[i], primary_pl.iloc[i]))
-                self.primary_lower_active = True
-                self.last_primary_pl_idx = i
+                # Handle existing orders and new signals
+                if current_signal and last_signals.get(symbol) != current_signal:
+                    position_side, position_size = await check_position(symbol)
+                    if position_side:
+                        trades_placed += 1
+                        if position_side == 'short':
+                            close_order_id = await place_market_buy_order(symbol, position_size, trades_placed, retries=5)
+                            if close_order_id:
+                                print(f"Closed short position for {symbol} with order {close_order_id}")
+                            else:
+                                print(f"Failed to close short position for {symbol} after 5 attempts.")
+                                send_telegram_message(f"Failed to close short position for {symbol} after 5 attempts.")
+                                continue
+                        elif position_side == 'long':
+                            close_order_id = await place_market_sell_order(symbol, position_size, trades_placed, retries=5)
+                            if close_order_id:
+                                print(f"Closed long position for {symbol} with order {close_order_id}")
+                            else:
+                                print(f"Failed to close long position for {symbol} after 5 attempts.")
+                                send_telegram_message(f"Failed to close long position for {symbol} after 5 attempts.")
+                                continue
+                        if open_orders.get(symbol):
+                            if not await cancel_open_order(symbol, open_orders[symbol], retries=5):
+                                continue
+                        open_orders[symbol] = None
+                        last_order_types[symbol] = None
 
-            if not np.isnan(secondary_ph.iloc[i]) and (not self.secondary_upper_active or self.last_secondary_ph_idx < i - self.secondary_length):
-                if self.secondary_upper and self.secondary_upper[-1][4]:
-                    last_end_idx, _, last_slope, _, last_value = self.secondary_upper[-1]
-                    self.secondary_upper.append((last_end_idx, i, last_slope, last_value, last_value))
-                else:
-                    self.secondary_upper.append((i, i, secondary_slope.iloc[i], secondary_ph.iloc[i], secondary_ph.iloc[i]))
-                self.secondary_upper_active = True
-                self.last_secondary_ph_idx = i
+                    # Update signal and place new order
+                    last_signals[symbol] = current_signal
 
-            if not np.isnan(secondary_pl.iloc[i]) and (not self.secondary_lower_active or self.last_secondary_pl_idx < i - self.secondary_length):
-                if self.secondary_lower and self.secondary_lower[-1][4]:
-                    last_end_idx, _, last_slope, _, last_value = self.secondary_lower[-1]
-                    self.secondary_lower.append((last_end_idx, i, last_slope, last_value, last_value))
-                else:
-                    self.secondary_lower.append((i, i, secondary_slope.iloc[i], secondary_pl.iloc[i], secondary_pl.iloc[i]))
-                self.secondary_lower_active = True
-                self.last_secondary_pl_idx = i
-
-            for lines, trendlines, is_upper, active_flag, extension in [
-                (primary_upper_lines, self.primary_upper, True, self.primary_upper_active, self.primary_extension),
-                (primary_lower_lines, self.primary_lower, False, self.primary_lower_active, self.primary_extension),
-                (secondary_upper_lines, self.secondary_upper, True, self.secondary_upper_active, self.secondary_extension),
-                (secondary_lower_lines, self.secondary_lower, False, self.secondary_lower_active, self.secondary_extension)
-            ]:
-                current_val = np.nan
-                for idx, (start_idx, end_idx, slope_val, start_val, last_val) in enumerate(trendlines):
-                    if i >= start_idx:
-                        bars_since = i - start_idx
-                        val = start_val + (slope_val * bars_since if not is_upper else -slope_val * bars_since)
-                        max_extension = min(extension, int((high.max() - low.min()) / abs(slope_val)) if slope_val != 0 else extension)
-                        if bars_since <= max_extension:
-                            lines.iloc[i] = val
-                            current_val = val
-                            trendlines[idx] = (start_idx, i, slope_val, start_val, val)
+                    if current_signal == 'long':
+                        trades_placed += 1
+                        # Place $15 long position
+                        order_id = await place_market_buy_order(symbol, full_quantity, trades_placed, retries=5)
+                        if order_id:
+                            open_orders[symbol] = order_id
+                            last_order_types[symbol] = 'BUY'
+                            # Immediately close $14 position
+                            trades_placed += 1
+                            close_order_id = await place_market_sell_order(symbol, close_quantity, trades_placed, retries=5)
+                            if close_order_id:
+                                print(f"Closed $14 of long position for {symbol}, leaving $1 open")
+                            else:
+                                print(f"Failed to close $14 of long position for {symbol} after 5 attempts.")
+                                send_telegram_message(f"Failed to close $14 of long position for {symbol} after 5 attempts.")
                         else:
-                            lines.iloc[i] = np.nan
-                            trendlines[idx] = (start_idx, end_idx, slope_val, start_val, last_val)
-
-                if active_flag and not np.isnan(current_val):
-                    if (is_upper and close.iloc[i] > current_val) or (not is_upper and close.iloc[i] < current_val):
-                        break_series = primary_upos if lines is primary_upper_lines else primary_dnos if lines is primary_lower_lines else secondary_upos if lines is secondary_upper_lines else secondary_dnos
-                        break_series.iloc[i] = 1
-                        if lines is primary_upper_lines:
-                            self.primary_upper_active = False
-                        elif lines is primary_lower_lines:
-                            self.primary_lower_active = False
-                        elif lines is secondary_upper_lines:
-                            self.secondary_upper_active = False
+                            print(f"Failed to place new buy order for {symbol} after 5 attempts.")
+                    elif current_signal == 'short':
+                        trades_placed += 1
+                        # Place $15 short position
+                        order_id = await place_market_sell_order(symbol, full_quantity, trades_placed, retries=5)
+                        if order_id:
+                            open_orders[symbol] = order_id
+                            last_order_types[symbol] = 'SELL'
+                            # Immediately close $14 position
+                            trades_placed += 1
+                            close_order_id = await place_market_buy_order(symbol, close_quantity, trades_placed, retries=5)
+                            if close_order_id:
+                                print(f"Closed $14 of short position for {symbol}, leaving $1 open")
+                            else:
+                                print(f"Failed to close $14 of short position for {symbol} after 5 attempts.")
+                                send_telegram_message(f"Failed to close $14 of short position for {symbol} after 5 attempts.")
                         else:
-                            self.secondary_lower_active = False
-                        for idx, (start_idx, end_idx, slope_val, start_val, last_val) in enumerate(trendlines):
-                            if end_idx == i:
-                                trendlines[idx] = (start_idx, i, slope_val, start_val, current_val)
-                                lines.iloc[i] = current_val
-                                lines.iloc[i + 1:] = np.nan
+                            print(f"Failed to place new sell order for {symbol} after 5 attempts.")
+                else:
+                    print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
 
-        primary_up_breaks = (primary_upos.diff() > 0) & (primary_upos == 1)
-        primary_down_breaks = (primary_dnos.diff() > 0) & (primary_dnos == 1)
-        secondary_up_breaks = (secondary_upos.diff() > 0) & (secondary_upos == 1)
-        secondary_down_breaks = (secondary_dnos.diff() > 0) & (secondary_dnos == 1)
+            print(f"\nCycle completed. Total trades placed: {trades_placed}")
+            print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
+            await asyncio.sleep(1800)  # 30 minutes
 
-        return {
-            'primary_upper': primary_upper_lines,
-            'primary_lower': primary_lower_lines,
-            'secondary_upper': secondary_upper_lines,
-            'secondary_lower': secondary_lower_lines,
-            'primary_up_breaks': primary_up_breaks,
-            'primary_down_breaks': primary_down_breaks,
-            'secondary_up_breaks': secondary_up_breaks,
-            'secondary_down_breaks': secondary_down_breaks
-        }
+        except Exception as e:
+            print(f'An error occurred in cycle: {e}')
+            await asyncio.sleep(60)  # 1 minute
 
-async def send_to_telegram(plot_buffer):
-    bot = telegram.Bot(token=config.TELEGRAM_TOKEN)
-    async with bot:
-        await bot.send_photo(chat_id=config.CHAT_ID, photo=plot_buffer)
-
-def fetch_btcusdt_data():
-    exchange = ccxt.binance()
-    timeframe = '1h'
-    limit = 100
-    ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return df
-
-def create_plot(df, results):
-    plt.figure(figsize=(14, 7))
-    plt.plot(df['timestamp'], df['close'], label='BTC/USDT Close', color='blue', alpha=0.7)
-    
-    for line, color, label, width in [
-        (results['primary_upper'], 'teal', 'Primary Upper', 2),
-        (results['primary_lower'], 'red', 'Primary Lower', 2),
-        (results['secondary_upper'], 'green', 'Secondary Upper', 1),
-        (results['secondary_lower'], 'purple', 'Secondary Lower', 1)
-    ]:
-        valid = line[line.notna()]
-        times = df['timestamp'][line.notna()]
-        plt.plot(times, valid, label=label, color=color, linestyle='--', linewidth=width)
-    
-    valid_upper = results['primary_upper'][results['primary_upper'].notna()]
-    valid_lower = results['primary_lower'][results['primary_lower'].notna()]
-    upper_times = df['timestamp'][results['primary_upper'].notna()]
-    lower_times = df['timestamp'][results['primary_lower'].notna()]
-    if len(valid_upper) > 0 and len(valid_lower) > 0:
-        plt.fill_between(upper_times, valid_upper, valid_lower, color='teal', alpha=0.1)
-
-    for breaks, color, marker, label in [
-        (results['primary_up_breaks'], 'green', '^', 'Primary Up Break'),
-        (results['primary_down_breaks'], 'red', 'v', 'Primary Down Break'),
-        (results['secondary_up_breaks'], 'lime', '^', 'Secondary Up Break'),
-        (results['secondary_down_breaks'], 'magenta', 'v', 'Secondary Down Break')
-    ]:
-        break_df = df[breaks]
-        break_indices = break_df.index
-        break_values = (results['primary_upper'] if 'primary_up' in label.lower() else 
-                       results['primary_lower'] if 'primary_down' in label.lower() else 
-                       results['secondary_upper'] if 'secondary_up' in label.lower() else 
-                       results['secondary_lower'])[break_indices]
-        plt.scatter(break_df['timestamp'], break_values, color=color, marker=marker, s=100, zorder=5, label=label)
-    
-    plt.title(f'BTC/USDT Trendlines with Breaks - {datetime.now().strftime("%Y-%m-d %H:%M")}')
-    plt.xlabel('Time')
-    plt.ylabel('Price (USDT)')
-    plt.legend(loc='best')
-    plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
-    buffer.seek(0)
-    plt.close()
-    return buffer
-
+# Run the trading strategy
 async def main():
-    df = fetch_btcusdt_data()
-    trendlines = TrendlinesWithBreaks(
-        primary_length=20,
-        secondary_length=10,
-        mult=1.0,
-        primary_extension=50,
-        secondary_extension=25
-    )
-    results = trendlines.process(df['high'], df['low'], df['close'])
-    plot_buffer = create_plot(df, results)
-    await send_to_telegram(plot_buffer)
-    plot_buffer.close()
+    if symbols:
+        await ema_strategy()
+    else:
+        print("No symbols available to trade. Exiting...")
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
