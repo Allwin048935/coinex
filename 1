@@ -12,9 +12,9 @@ from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval, TELEGRAM_BO
 trading_params = {
     "market_type": "FUTURES",
     "margin_mode": "isolated",
-    "leverage": 1,
-    "position_value_usd": 12,  # $15 position
-    "close_value_usd": 11,     # Close $14, leaving $1
+    "leverage": 10,
+    "position_value_usd": 15.0,  # $15 position
+    "close_value_usd": 14.0,     # Close $14
 }
 
 # API endpoints
@@ -55,10 +55,11 @@ long_ema_period = 100
 symbols_info = fetch_coinex_symbols()
 symbols = list(symbols_info.keys())
 
-# Track last order types, open orders, and last signals
+# Track last order types, open orders, last signals, and test completion
 last_order_types = {symbol: None for symbol in symbols}
 open_orders = {symbol: None for symbol in symbols}
 last_signals = {symbol: None for symbol in symbols}
+test_completed = {symbol: False for symbol in symbols}  # Track if remaining position close test was done
 
 # Function to send Telegram message
 def send_telegram_message(message):
@@ -190,7 +191,7 @@ async def check_position(symbol):
         return None, 0
 
 # Async function to place a market buy order
-async def place_market_buy_order(symbol, quantity, order_num, retries=5, delay=1):
+async def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
     attempt = 0
     while attempt < retries:
         try:
@@ -207,11 +208,10 @@ async def place_market_buy_order(symbol, quantity, order_num, retries=5, delay=1
             if attempt < retries:
                 await asyncio.sleep(delay)
     print(f"Order #{order_num} - Failed to place Market Buy Order for {symbol} after {retries} attempts.")
-    send_telegram_message(f"Failed to place Market Buy Order for {symbol} after {retries} attempts.")
     return None
 
 # Async function to place a market sell order
-async def place_market_sell_order(symbol, quantity, order_num, retries=5, delay=1):
+async def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
     attempt = 0
     while attempt < retries:
         try:
@@ -228,11 +228,34 @@ async def place_market_sell_order(symbol, quantity, order_num, retries=5, delay=
             if attempt < retries:
                 await asyncio.sleep(delay)
     print(f"Order #{order_num} - Failed to place Market Sell Order for {symbol} after {retries} attempts.")
-    send_telegram_message(f"Failed to place Market Sell Order for {symbol} after {retries} attempts.")
+    return None
+
+# Async function to close existing position with 5 retries
+async def close_existing_position(symbol, position_side, position_size, order_num, retries=5, delay=1):
+    attempt = 0
+    while attempt < retries:
+        try:
+            if not await set_trading_parameters(symbol):
+                raise Exception("Failed to set trading parameters")
+            if position_side == 'short':
+                order = await exchange.create_market_buy_order(symbol, amount=position_size)
+                print(f"Order #{order_num} - Closed short position for {symbol}: {order['id']}, Quantity: {position_size}")
+                return order['id']
+            elif position_side == 'long':
+                order = await exchange.create_market_sell_order(symbol, amount=position_size)
+                print(f"Order #{order_num} - Closed long position for {symbol}: {order['id']}, Quantity: {position_size}")
+                return order['id']
+        except Exception as e:
+            attempt += 1
+            print(f"Order #{order_num} - Error closing {position_side} position for {symbol} (Attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    print(f"Order #{order_num} - Failed to close {position_side} position for {symbol} after {retries} attempts.")
+    send_telegram_message(f"Failed to close {position_side} position for {symbol} after {retries} attempts.")
     return None
 
 # Async function to cancel an open order
-async def cancel_open_order(symbol, order_id, retries=5, delay=1):
+async def cancel_open_order(symbol, order_id, retries=3, delay=1):
     attempt = 0
     while attempt < retries:
         try:
@@ -247,12 +270,11 @@ async def cancel_open_order(symbol, order_id, retries=5, delay=1):
             if attempt < retries:
                 await asyncio.sleep(delay)
     print(f"Failed to cancel open order for {symbol}: {order_id} after {retries} attempts.")
-    send_telegram_message(f"Failed to cancel open order for {symbol}: {order_id} after {retries} attempts.")
     return False
 
 # Main async trading function
 async def ema_strategy():
-    global symbols, symbols_info, last_order_types, open_orders, last_signals
+    global symbols, symbols_info, last_order_types, open_orders, last_signals, test_completed
 
     while True:
         try:
@@ -264,6 +286,7 @@ async def ema_strategy():
             last_order_types = {symbol: last_order_types.get(symbol) for symbol in symbols}
             open_orders = {symbol: open_orders.get(symbol) for symbol in symbols}
             last_signals = {symbol: last_signals.get(symbol) for symbol in symbols}
+            test_completed = {symbol: test_completed.get(symbol, False) for symbol in symbols}
 
             trades_placed = 0
 
@@ -289,7 +312,9 @@ async def ema_strategy():
                 # Calculate quantities for $15 and $14
                 full_quantity = calculate_quantity(symbol, latest_close, trading_params['position_value_usd'])
                 close_quantity = calculate_quantity(symbol, latest_close, trading_params['close_value_usd'])
-                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Full Quantity: {full_quantity}, Close Quantity: {close_quantity}")
+                # Calculate remaining quantity (full - close)
+                remaining_quantity = round(full_quantity - close_quantity, 6)
+                print(f"Symbol: {symbol}, Latest Close: {latest_close}, Full Quantity: {full_quantity}, Close Quantity: {close_quantity}, Remaining Quantity: {remaining_quantity}")
 
                 # Check EMA conditions
                 if historical_data['short_ema'].iloc[-1] > historical_data['long_ema'].iloc[-1]:
@@ -308,65 +333,69 @@ async def ema_strategy():
                     position_side, position_size = await check_position(symbol)
                     if position_side:
                         trades_placed += 1
-                        if position_side == 'short':
-                            close_order_id = await place_market_buy_order(symbol, position_size, trades_placed, retries=5)
-                            if close_order_id:
-                                print(f"Closed short position for {symbol} with order {close_order_id}")
-                            else:
-                                print(f"Failed to close short position for {symbol} after 5 attempts.")
-                                send_telegram_message(f"Failed to close short position for {symbol} after 5 attempts.")
-                                continue
-                        elif position_side == 'long':
-                            close_order_id = await place_market_sell_order(symbol, position_size, trades_placed, retries=5)
-                            if close_order_id:
-                                print(f"Closed long position for {symbol} with order {close_order_id}")
-                            else:
-                                print(f"Failed to close long position for {symbol} after 5 attempts.")
-                                send_telegram_message(f"Failed to close long position for {symbol} after 5 attempts.")
-                                continue
+                        close_order_id = await close_existing_position(symbol, position_side, position_size, trades_placed, retries=5)
+                        if not close_order_id:
+                            print(f"Skipping new order for {symbol} due to failure to close existing position.")
+                            continue
                         if open_orders.get(symbol):
-                            if not await cancel_open_order(symbol, open_orders[symbol], retries=5):
-                                continue
+                            await cancel_open_order(symbol, open_orders[symbol], retries=3)
                         open_orders[symbol] = None
                         last_order_types[symbol] = None
 
-                    # Update signal and place new order
+                    # Update signal
                     last_signals[symbol] = current_signal
 
-                    if current_signal == 'long':
+                    if current_signal == 'long' and not test_completed[symbol]:
                         trades_placed += 1
                         # Place $15 long position
-                        order_id = await place_market_buy_order(symbol, full_quantity, trades_placed, retries=5)
+                        order_id = await place_market_buy_order(symbol, full_quantity, trades_placed, retries=3)
                         if order_id:
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'BUY'
-                            # Immediately close $14 position
+                            # Close $14 position
                             trades_placed += 1
-                            close_order_id = await place_market_sell_order(symbol, close_quantity, trades_placed, retries=5)
+                            close_order_id = await place_market_sell_order(symbol, close_quantity, trades_placed, retries=3)
                             if close_order_id:
-                                print(f"Closed $14 of long position for {symbol}, leaving $1 open")
+                                print(f"Closed $14 of long position for {symbol}, leaving remaining position open")
+                                # Wait 5 seconds and attempt to close remaining position
+                                await asyncio.sleep(5)
+                                trades_placed += 1
+                                # Verify remaining position size
+                                position_side, position_size = await check_position(symbol)
+                                if position_side == 'long' and position_size > 0:
+                                    remaining_order_id = await place_market_sell_order(symbol, position_size, trades_placed, retries=3)
+                                    if remaining_order_id:
+                                        print(f"Successfully closed remaining position for {symbol} with order {remaining_order_id}, Quantity: {position_size}")
+                                        test_completed[symbol] = True  # Mark test as completed
+                                    else:
+                                        print(f"Failed to close remaining position for {symbol} after 3 attempts.")
+                                        send_telegram_message(f"Failed to close remaining position for {symbol} after 3 attempts. Check if API supports small position closure.")
+                                else:
+                                    print(f"No remaining long position for {symbol} to close after 5 seconds.")
+                                    test_completed[symbol] = True  # Mark test as completed
                             else:
-                                print(f"Failed to close $14 of long position for {symbol} after 5 attempts.")
-                                send_telegram_message(f"Failed to close $14 of long position for {symbol} after 5 attempts.")
+                                print(f"Failed to close $14 of long position for {symbol} after 3 attempts.")
+                            # Skip placing new position to focus on test
+                            continue
                         else:
-                            print(f"Failed to place new buy order for {symbol} after 5 attempts.")
+                            print(f"Failed to place new buy order for {symbol} after 3 attempts.")
+                            continue
                     elif current_signal == 'short':
                         trades_placed += 1
                         # Place $15 short position
-                        order_id = await place_market_sell_order(symbol, full_quantity, trades_placed, retries=5)
+                        order_id = await place_market_sell_order(symbol, full_quantity, trades_placed, retries=3)
                         if order_id:
                             open_orders[symbol] = order_id
                             last_order_types[symbol] = 'SELL'
-                            # Immediately close $14 position
+                            # Close $14 position
                             trades_placed += 1
-                            close_order_id = await place_market_buy_order(symbol, close_quantity, trades_placed, retries=5)
+                            close_order_id = await place_market_buy_order(symbol, close_quantity, trades_placed, retries=3)
                             if close_order_id:
                                 print(f"Closed $14 of short position for {symbol}, leaving $1 open")
                             else:
-                                print(f"Failed to close $14 of short position for {symbol} after 5 attempts.")
-                                send_telegram_message(f"Failed to close $14 of short position for {symbol} after 5 attempts.")
+                                print(f"Failed to close $14 of short position for {symbol} after 3 attempts.")
                         else:
-                            print(f"Failed to place new sell order for {symbol} after 5 attempts.")
+                            print(f"Failed to place new sell order for {symbol} after 3 attempts.")
                 else:
                     print(f"{symbol} Signal unchanged or no new signal, skipping order placement")
 
