@@ -48,6 +48,7 @@ STOP_LOSS_URL = "https://api.coinex.com/v2/futures/set-position-stop-loss"
 # Global variables
 SELECTED_SYMBOLS = []  # Start empty, populated by /set_symbols
 last_order_types = {}
+symbols_info = {}  # Cache for symbol info to reduce API calls
 
 # Create a CoinEx client (async version)
 exchange = ccxt.coinex({
@@ -59,11 +60,17 @@ exchange = ccxt.coinex({
 
 # Fetch symbols info for minimum amounts
 def fetch_coinex_symbols():
+    global symbols_info
+    if symbols_info:  # Return cached data if available
+        return symbols_info
     url = "https://api.coinex.com/v2/futures/market"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
+        if not data.get('data'):
+            logger.error("No data returned from CoinEx symbols API")
+            return {}
         symbols_info = {
             s['market']: float(s['min_amount'])
             for s in data['data']
@@ -167,23 +174,31 @@ async def set_trading_parameters(symbol):
 # Async function to fetch current day's candle data
 async def fetch_current_day_candle(symbol):
     try:
-        # Fetch the most recent completed daily candle to get the open price
+        # Fetch the most recent completed daily candle
         ohlcv = await exchange.fetch_ohlcv(symbol, '1d', limit=1)
-        if not ohlcv:
-            logger.error(f"No daily data for {symbol}")
+        if not ohlcv or len(ohlcv) == 0:
+            logger.error(f"No OHLCV data returned for {symbol}")
             return None
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        if df.empty or df['open'].iloc[0] is None:
+            logger.error(f"Invalid or missing OHLCV data for {symbol}: {df}")
+            return None
         
         # Fetch current market price
         ticker = await exchange.fetch_ticker(symbol)
-        if 'bid' not in ticker or 'ask' not in ticker:
-            logger.error(f"Error: 'bid' or 'ask' not found in ticker for {symbol}")
+        if not ticker or 'bid' not in ticker or 'ask' not in ticker or ticker['bid'] is None or ticker['ask'] is None:
+            logger.error(f"Invalid or missing ticker data for {symbol}: {ticker}")
             return None
-        current_price = (float(ticker['bid']) + float(ticker['ask'])) / 2
+        
+        try:
+            current_price = (float(ticker['bid']) + float(ticker['ask'])) / 2
+        except (TypeError, ValueError) as e:
+            logger.error(f"Error converting bid/ask to float for {symbol}: {e}, bid={ticker.get('bid')}, ask={ticker.get('ask')}")
+            return None
         
         # Construct current day's candle
         current_time = pd.Timestamp.now(tz='UTC').floor('D')
-        open_price = float(df['open'].iloc[0])  # Open from previous day's close
+        open_price = float(df['open'].iloc[0])
         high_price = max(float(df['high'].iloc[0]), current_price)
         low_price = min(float(df['low'].iloc[0]), current_price)
         volume = float(df['volume'].iloc[0])  # Approximation
@@ -207,6 +222,9 @@ async def fetch_current_day_candle(symbol):
 
 # Function to calculate quantity
 def calculate_quantity(symbol, latest_close):
+    global symbols_info
+    if not symbols_info:
+        fetch_coinex_symbols()
     min_amount = symbols_info.get(symbol, 0.0001)
     quantity = min_amount * 1.01
     return quantity
@@ -362,19 +380,25 @@ async def set_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for symbol in new_symbols:
             last_order_types[symbol] = None
         await update.message.reply_text(f"Added trading symbols: {', '.join(new_symbols)}. Current symbols: {', '.join(SELECTED_SYMBOLS)}")
+        logger.info(f"Added symbols via Telegram: {', '.join(new_symbols)}")
     else:
         await update.message.reply_text("No new valid symbols provided.")
+        logger.info("No new valid symbols provided via /set_symbols")
 
     if invalid_symbols:
         await update.message.reply_text(f"Invalid symbols: {', '.join(invalid_symbols)}")
+        logger.info(f"Invalid symbols provided: {', '.join(invalid_symbols)}")
     if skipped_duplicates:
         await update.message.reply_text(f"Skipped duplicate symbols: {', '.join(skipped_duplicates)}")
+        logger.info(f"Skipped duplicate symbols: {', '.join(skipped_duplicates)}")
 
 async def reset_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SELECTED_SYMBOLS, last_order_types
+    global SELECTED_SYMBOLS, last_order_types, symbols_info
     SELECTED_SYMBOLS = []
     last_order_types.clear()
+    symbols_info.clear()  # Clear cached symbol info
     await update.message.reply_text("Cleared all trading symbols and last order types. Trading stopped.")
+    logger.info("Cleared all trading symbols and last order types via /reset_symbols")
 
 # Trading Loop
 async def run_trading_loop(application: Application):
@@ -388,7 +412,7 @@ async def run_trading_loop(application: Application):
                 if candle_data is not None and not candle_data.empty:
                     valid_symbols.append(symbol)
                     await check_and_trade(symbol, bot, chat_id)
-                await asyncio.sleep(1)  # Avoid rate limits
+                await asyncio.sleep(2)  # Increased delay to avoid rate limits
             logger.info(f"Completed trading cycle for {len(valid_symbols)} valid symbols: {valid_symbols}")
         else:
             logger.info("No symbols selected, skipping trading cycle")
