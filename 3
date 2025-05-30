@@ -82,10 +82,21 @@ def fetch_coinex_symbols():
         logger.error(f"Error fetching symbols from CoinEx: {e}")
         return {}
 
-# Validate symbol against CoinEx futures symbols
-def validate_symbol(symbol):
+# Validate symbol against CoinEx futures symbols and check market activity
+async def validate_symbol(symbol):
+    symbol = symbol.upper()
     valid_symbols = fetch_coinex_symbols()
-    return symbol.upper() in valid_symbols
+    if symbol not in valid_symbols:
+        return False, "Symbol not found in CoinEx futures markets"
+    
+    try:
+        ticker = await exchange.fetch_ticker(symbol)
+        if not ticker or 'bid' not in ticker or 'ask' not in ticker or ticker['bid'] is None or ticker['ask'] is None:
+            return False, "No active bids or asks (inactive market)"
+        return True, ""
+    except Exception as e:
+        logger.error(f"Error validating market activity for {symbol}: {e}")
+        return False, f"Error checking market activity: {str(e)}"
 
 # Function to generate signature for CoinEx API
 def generate_signature(method, path, body, timestamp, secret):
@@ -251,7 +262,7 @@ async def send_order_notification(bot, chat_id, symbol, side, price, order_id):
         logger.error(f"Failed to send Telegram notification for {symbol}: {e}")
 
 async def send_error_notification(bot, chat_id, symbol, error_message):
-    message = f"Failed to place order for {symbol}. Error: {error_message}"
+    message = f"Failed to process {symbol}. Error: {error_message}"
     try:
         await bot.send_message(chat_id=chat_id, text=message)
         logger.info(f"Sent Telegram error notification for {symbol}")
@@ -364,16 +375,20 @@ async def set_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     new_symbols = []
     invalid_symbols = []
+    inactive_symbols = []
     skipped_duplicates = []
     for symbol in context.args:
         symbol = symbol.upper()
         if symbol in SELECTED_SYMBOLS:
             skipped_duplicates.append(symbol)
             continue
-        if validate_symbol(symbol):
+        is_valid, reason = await validate_symbol(symbol)
+        if is_valid:
             new_symbols.append(symbol)
+        elif "inactive market" in reason.lower():
+            inactive_symbols.append((symbol, reason))
         else:
-            invalid_symbols.append(symbol)
+            invalid_symbols.append((symbol, reason))
 
     if new_symbols:
         SELECTED_SYMBOLS.extend(new_symbols)
@@ -386,8 +401,13 @@ async def set_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("No new valid symbols provided via /set_symbols")
 
     if invalid_symbols:
-        await update.message.reply_text(f"Invalid symbols: {', '.join(invalid_symbols)}")
-        logger.info(f"Invalid symbols provided: {', '.join(invalid_symbols)}")
+        message = "\n".join([f"{sym}: {reason}" for sym, reason in invalid_symbols])
+        await update.message.reply_text(f"Invalid symbols:\n{message}")
+        logger.info(f"Invalid symbols provided: {', '.join([sym for sym, _ in invalid_symbols])}")
+    if inactive_symbols:
+        message = "\n".join([f"{sym}: {reason}" for sym, reason in inactive_symbols])
+        await update.message.reply_text(f"Inactive symbols (no trading activity):\n{message}")
+        logger.info(f"Inactive symbols provided: {', '.join([sym for sym, _ in inactive_symbols])}")
     if skipped_duplicates:
         await update.message.reply_text(f"Skipped duplicate symbols: {', '.join(skipped_duplicates)}")
         logger.info(f"Skipped duplicate symbols: {', '.join(skipped_duplicates)}")
@@ -412,7 +432,9 @@ async def run_trading_loop(application: Application):
                 if candle_data is not None and not candle_data.empty:
                     valid_symbols.append(symbol)
                     await check_and_trade(symbol, bot, chat_id)
-                await asyncio.sleep(2)  # Increased delay to avoid rate limits
+                else:
+                    await send_error_notification(bot, chat_id, symbol, "Failed to fetch candle data")
+                await asyncio.sleep(2)  # Delay to avoid rate limits
             logger.info(f"Completed trading cycle for {len(valid_symbols)} valid symbols: {valid_symbols}")
         else:
             logger.info("No symbols selected, skipping trading cycle")
