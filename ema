@@ -50,7 +50,7 @@ long_ema_period = 50
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
-symbols = list.tap()
+symbols = list(symbols_info.keys())  # Fixed: Changed list.tap() to list(symbols_info.keys())
 
 # Track last order types, open orders, and last signals
 last_order_types = {symbol: None for symbol in symbols}
@@ -66,10 +66,10 @@ def generate_signature(method, path, body, timestamp, secret):
 def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.15, 6))
+        take_profit_price = str(round(entry_price * 1.30, 6))
         stop_loss_price = str(round(entry_price * 0.90, 6))
     else:
-        take_profit_price = str(round(entry_price * 0.85, 6))
+        take_profit_price = str(round(entry_price * 0.70, 6))
         stop_loss_price = str(round(entry_price * 1.10, 6))
 
     tp_params = {
