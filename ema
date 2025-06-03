@@ -12,7 +12,7 @@ from config import COINEX_API_KEY, COINEX_API_SECRET, time_interval
 trading_params = {
     "market_type": "FUTURES",
     "margin_mode": "isolated",
-    "leverage": 10
+    "leverage": 5
 }
 
 # API endpoints
@@ -45,7 +45,7 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 5
+short_ema_period = 2
 long_ema_period = 50
 
 # Get initial symbols and their min_amounts
@@ -67,10 +67,10 @@ def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     if side == 'long':
         take_profit_price = str(round(entry_price * 1.30, 6))
-        stop_loss_price = str(round(entry_price * 0.90, 6))
+        stop_loss_price = str(round(entry_price * 0.95, 6))
     else:
-        take_profit_price = str(round(entry_price * 0.70, 6))
-        stop_loss_price = str(round(entry_price * 1.10, 6))
+        take_profit_price = str(round(entry_price * 0.85, 6))
+        stop_loss_price = str(round(entry_price * 1.05, 6))
 
     tp_params = {
         "market": symbol,
@@ -179,7 +179,7 @@ async def check_position(symbol):
         return None, 0
 
 # Async function to place a market buy order with retry logic
-async def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1):
+async def place_market_buy_order(symbol, quantity, order_num, retries=5, delay=5):
     attempt = 0
     while attempt < retries:
         try:
@@ -201,7 +201,7 @@ async def place_market_buy_order(symbol, quantity, order_num, retries=3, delay=1
     return None
 
 # Async function to place a market sell order with retry logic
-async def place_market_sell_order(symbol, quantity, order_num, retries=3, delay=1):
+async def place_market_sell_order(symbol, quantity, order_num, retries=5, delay=5):
     attempt = 0
     while attempt < retries:
         try:
@@ -371,7 +371,7 @@ async def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(300)  # 30 minutes
+            await asyncio.sleep(3600)  # 30 minutes
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
