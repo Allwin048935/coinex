@@ -66,10 +66,10 @@ def generate_signature(method, path, body, timestamp, secret):
 def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.30, 6))
+        take_profit_price = str(round(entry_price * 1.15, 6))
         stop_loss_price = str(round(entry_price * 0.90, 6))
     else:
-        take_profit_price = str(round(entry_price * 0.70, 6))
+        take_profit_price = str(round(entry_price * 0.85, 6))
         stop_loss_price = str(round(entry_price * 1.10, 6))
 
     tp_params = {
