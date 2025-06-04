@@ -50,7 +50,7 @@ long_ema_period = 30
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
-symbols = list(symbols_info.keys())  # Fixed: Changed list.tap() to list(symbols_info.keys())
+symbols = list(symbols_info.keys())
 
 # Track last order types, open orders, and last signals
 last_order_types = {symbol: None for symbol in symbols}
@@ -267,6 +267,12 @@ async def ema_strategy():
                     print(f"Error: latest_close is None for {symbol}")
                     continue
 
+                # Calculate last candle amplitude ratio: ((close - open) / open) * 100
+                last_candle_open = float(historical_data['open'].iloc[-2])
+                last_candle_close = float(historical_data['close'].iloc[-2])
+                amplitude_ratio = ((last_candle_close - last_candle_open) / last_candle_open) * 100
+                print(f"{symbol} Last Candle Amplitude Ratio: {amplitude_ratio:.2f}%")
+
                 quantity = calculate_quantity(symbol, latest_close)
                 print(f"Symbol: {symbol}, Latest Close: {latest_close}, Min Amount: {symbols_info[symbol]}, Quantity: {quantity}")
 
@@ -274,17 +280,19 @@ async def ema_strategy():
                 current_signal = None
                 position_side, position_size = await check_position(symbol)
 
-                # Long entry: short_ema[-2] > long_ema[-2] and short_ema[-3] < long_ema[-3]
+                # Long entry: short_ema[-2] > long_ema[-2] and short_ema[-3] < long_ema[-3] and amplitude_ratio < 10
                 if (historical_data['short_ema'].iloc[-2] > historical_data['long_ema'].iloc[-2] and
-                    historical_data['short_ema'].iloc[-3] < historical_data['long_ema'].iloc[-3]):
+                    historical_data['short_ema'].iloc[-3] < historical_data['long_ema'].iloc[-3] and
+                    amplitude_ratio < 10):
                     current_signal = 'long'
-                    print(f"{symbol} Long Entry Signal")
+                    print(f"{symbol} Long Entry Signal (Amplitude Ratio: {amplitude_ratio:.2f}%)")
 
-                # Short entry: short_ema[-2] < long_ema[-2] and short_ema[-3] > long_ema[-3]
+                # Short entry: short_ema[-2] < long_ema[-2] and short_ema[-3] > long_ema[-3] and amplitude_ratio > -10
                 elif (historical_data['short_ema'].iloc[-2] < historical_data['long_ema'].iloc[-2] and
-                      historical_data['short_ema'].iloc[-3] > historical_data['long_ema'].iloc[-3]):
+                      historical_data['short_ema'].iloc[-3] > historical_data['long_ema'].iloc[-3] and
+                      amplitude_ratio > -10):
                     current_signal = 'short'
-                    print(f"{symbol} Short Entry Signal")
+                    print(f"{symbol} Short Entry Signal (Amplitude Ratio: {amplitude_ratio:.2f}%)")
 
                 # Long exit: short_ema[-1] < long_ema[-1] and short_ema[-2] > long_ema[-2]
                 if (position_side == 'long' and
