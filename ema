@@ -45,8 +45,8 @@ exchange = ccxt.coinex({
 })
 
 # Define EMA strategy parameters
-short_ema_period = 2
-long_ema_period = 30
+short_ema_period = 3
+long_ema_period = 50
 
 # Get initial symbols and their min_amounts
 symbols_info = fetch_coinex_symbols()
@@ -66,10 +66,10 @@ def generate_signature(method, path, body, timestamp, secret):
 def set_take_profit_stop_loss(symbol, side, entry_price):
     timestamp = str(int(time.time() * 1000))
     if side == 'long':
-        take_profit_price = str(round(entry_price * 1.30, 6))
+        take_profit_price = str(round(entry_price * 1.05, 6))
         stop_loss_price = str(round(entry_price * 0.95, 6))
     else:
-        take_profit_price = str(round(entry_price * 0.85, 6))
+        take_profit_price = str(round(entry_price * 0.95, 6))
         stop_loss_price = str(round(entry_price * 1.05, 6))
 
     tp_params = {
@@ -280,17 +280,17 @@ async def ema_strategy():
                 current_signal = None
                 position_side, position_size = await check_position(symbol)
 
-                # Long entry: short_ema[-2] > long_ema[-2] and short_ema[-3] < long_ema[-3] and amplitude_ratio < 10
+                # Long entry: short_ema[-2] > long_ema[-2] and short_ema[-3] < long_ema[-3] and amplitude_ratio < 2
                 if (historical_data['short_ema'].iloc[-2] > historical_data['long_ema'].iloc[-2] and
                     historical_data['short_ema'].iloc[-3] < historical_data['long_ema'].iloc[-3] and
-                    amplitude_ratio < 10):
+                    amplitude_ratio < 2):
                     current_signal = 'long'
                     print(f"{symbol} Long Entry Signal (Amplitude Ratio: {amplitude_ratio:.2f}%)")
 
-                # Short entry: short_ema[-2] < long_ema[-2] and short_ema[-3] > long_ema[-3] and amplitude_ratio > -10
+                # Short entry: short_ema[-2] < long_ema[-2] and short_ema[-3] > long_ema[-3] and amplitude_ratio > -2
                 elif (historical_data['short_ema'].iloc[-2] < historical_data['long_ema'].iloc[-2] and
                       historical_data['short_ema'].iloc[-3] > historical_data['long_ema'].iloc[-3] and
-                      amplitude_ratio > -10):
+                      amplitude_ratio > -2):
                     current_signal = 'short'
                     print(f"{symbol} Short Entry Signal (Amplitude Ratio: {amplitude_ratio:.2f}%)")
 
