@@ -379,7 +379,7 @@ async def ema_strategy():
 
             print(f"\nCycle completed. Total trades placed: {trades_placed}")
             print(f"Processed {len(symbols)} pairs. Sleeping for 30 minutes...")
-            await asyncio.sleep(1800)  # 30 minutes
+            await asyncio.sleep(900)  # 30 minutes
             
         except Exception as e:
             print(f'An error occurred in cycle: {e}')
